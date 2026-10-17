@@ -50,5 +50,6 @@ The app is `build\bin\Release\Explicitly Desktop.exe`.
 - Settings: `%APPDATA%\ExplicitlyDesktop\ExplicitlyDesktop.settings`
 - Lyrics (temp local copies): `%APPDATA%\ExplicitlyDesktop\lyrics` (delete a file to look it up again)
 - Genius key: `%APPDATA%\ExplicitlyDesktop\genius_token.txt`
-- Song recognition by audio fingerprint (only used if Windows has no "now playing" info) needs
-  `EXPLICITLY_ACOUSTID_KEY` and `EXPLICITLY_FPCALC` (Chromaprint's fpcalc.exe)
+- Song recognition by audio fingerprint (only used if Windows has no "now playing" info) uses the
+  AcoustID key shipped with the app and needs Chromaprint's `fpcalc.exe` next to the app (or
+  `EXPLICITLY_FPCALC`)

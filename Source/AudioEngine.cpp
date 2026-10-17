@@ -397,12 +397,14 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
         mediaInfoInitialized = false;
         
         // Fallback: Initialize Chromaprint + AcoustID
-        // No keys or personal paths in the source: AcoustID needs your own free
-        // client key (https://acoustid.org/api-key) and Chromaprint's fpcalc
+        // AcoustID application key shipped with the original project (AcoustID
+        // client keys identify an app and are meant to be embedded);
+        // EXPLICITLY_ACOUSTID_KEY overrides it. Needs Chromaprint's fpcalc
+        // (EXPLICITLY_FPCALC, or fpcalc.exe next to the app)
         const char* fpcalcEnv = std::getenv("EXPLICITLY_FPCALC");
         const char* acoustidEnv = std::getenv("EXPLICITLY_ACOUSTID_KEY");
         std::string fpcalcPath = fpcalcEnv != nullptr ? fpcalcEnv : "fpcalc.exe";
-        std::string acoustidKey = acoustidEnv != nullptr ? acoustidEnv : "";
+        std::string acoustidKey = acoustidEnv != nullptr ? acoustidEnv : "bNfeKNh59F";
         
         if (songRecognition.initialize(fpcalcPath, acoustidKey))
         {

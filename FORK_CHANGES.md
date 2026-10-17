@@ -87,9 +87,9 @@ can be switched off instantly with no delay.
 | Lyrics display | Repeated Whisper's words | Karaoke-style matched lyric lines, swears masked |
 | Settings | Chosen again on every launch | Remembered; auto-starts filtering |
 | Stop then Start | Failed (the model was freed on Stop) | Works |
-| Secrets | AcoustID key and a personal path hard-coded | Read from `EXPLICITLY_ACOUSTID_KEY` / `EXPLICITLY_FPCALC`; key files ignored |
+| Secrets | Personal fpcalc path hard-coded | AcoustID app key kept (overridable with `EXPLICITLY_ACOUSTID_KEY`); fpcalc from `EXPLICITLY_FPCALC` or next to the app; personal key files ignored |
 
-Note: the original's AcoustID key is still in the original project's history, which this fork shares.
+Song recognition by audio fingerprint (AcoustID) is only a fallback for when Windows has no "now playing" info, and needs Chromaprint's `fpcalc.exe`.
 
 ## Testing tools
 - `EXPLICITLY_DEBUG_RECORD=<folder>` records the app's input and output (60 s, or a rolling
