@@ -1,0 +1,8 @@
+{
+  "name": "explicitly-mobile-client-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test crypto.test.mjs protocol.test.mjs"
+  }
+}

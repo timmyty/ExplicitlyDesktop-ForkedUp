@@ -40,6 +40,7 @@
 #include "WindowsMediaInfo.h"
 #include "LyricsGuide.h"
 #include "Types.h"
+#include "PcmTap.h"
 
 class AudioEngine : public juce::AudioIODeviceCallback
 {
@@ -123,6 +124,33 @@ public:
         bypassUntilMs.store(juce::Time::getMillisecondCounterHiRes() + seconds * 1000.0);
     }
     bool isBypassed() const { return juce::Time::getMillisecondCounterHiRes() < bypassUntilMs.load(); }
+
+    //==============================================================================
+    // Phone streaming (docs/MOBILE_STREAMING.md). None of these change anything
+    // until they are used: with no tap, no flush, no hold and no local mute the
+    // callback behaves exactly as before.
+
+    /** Copy the final output (after muting, before the speaker mute) to this
+        tap at the end of every callback. nullptr stops it. The tap must
+        outlive the engine's use of it (set nullptr before deleting it). */
+    void setPcmTap (PcmTap* tap) { pcmTap.store (tap, std::memory_order_release); }
+
+    /** Drop the audio waiting in the delay buffer (after a seek). Done by the
+        audio thread on its next callback: playback refills for
+        initialDelaySeconds, heard as silence. Safe to call from any thread. */
+    void requestFlush() { flushRequested.store (true); }
+
+    /** Hold (pause) the delay pipeline: nothing is written to or read from the
+        delay buffer, Whisper gets no audio, the stream clock stops and the
+        output is silent. Releasing it continues exactly where it stopped.
+        Only affects filtering; with the filter off or bypassed audio passes
+        through as usual. Safe to call from any thread. */
+    void setHeld (bool shouldHold) { held.store (shouldHold); }
+    bool isHeld() const { return held.load(); }
+
+    /** Silence the speakers after the PCM tap (a phone is watching). */
+    void setLocalOutputMuted (bool shouldMute) { localOutputMuted.store (shouldMute); }
+    bool isLocalOutputMuted() const { return localOutputMuted.load(); }
     
     const ProfanityFilter& getProfanityFilter() const { return profanityFilter; }
 
@@ -133,6 +161,9 @@ public:
         bool buffering = false;      // Filter on but output silent while the delay refills
         bool bypassed = false;       // Filter on, but passed through for caption muting
         double delaySeconds = 0.0;   // Delay between input and output (0 when filter is off)
+        bool held = false;           // Delay pipeline frozen (phone paused), see setHeld
+        bool localMuted = false;     // Speakers silenced while a phone plays, see setLocalOutputMuted
+        int sampleRate = 0;          // Device rate (0 when not running)
     };
 
     /**
@@ -344,6 +375,15 @@ private:
     std::atomic<bool> filterEnabled{true};    // Filter Explicit Speech toggle
     std::atomic<double> bypassUntilMs{0.0};   // See setBypassLease
     bool filterActive() const { return filterEnabled.load() && !isBypassed(); }
+    
+    // Phone streaming (see setPcmTap, requestFlush, setHeld, setLocalOutputMuted)
+    std::atomic<PcmTap*> pcmTap{nullptr};
+    std::atomic<bool> flushRequested{false};
+    std::atomic<bool> held{false};
+    std::atomic<bool> localOutputMuted{false};
+    void finishOutput(float* const* outputChannelData, int numOutputChannels, int numSamples,
+                      bool filterOn, bool holding, uint32_t delaySamples) noexcept;
+    uint32_t currentDelaySamples() const noexcept;
     
     // Debug: EXPLICITLY_DEBUG_RECORD=<folder> records the first 60s of input
     // and output (mono) to WAVs, for measuring censor timing

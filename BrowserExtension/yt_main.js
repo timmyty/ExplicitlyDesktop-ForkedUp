@@ -54,7 +54,31 @@
   // Requests from content.js
   window.addEventListener("message", async (e) => {
     if (e.source !== window || e.data?.source !== "explicitly-content") return;
+
+    if (e.data.type === "navigate" && /^[A-Za-z0-9_-]{11}$/.test(e.data.videoId || "")) {
+      // The phone picked a video (remote.js): open it the way a click on a
+      // YouTube link does, so the page doesn't reload. remote.js checks the
+      // URL changed and loads the page itself otherwise
+      const id = e.data.videoId, start = Math.max(0, Math.floor(e.data.start || 0));
+      const url = "/watch?v=" + id + (start ? "&t=" + start + "s" : "");
+      const app = document.querySelector("ytd-app");
+      app?.dispatchEvent(new CustomEvent("yt-navigate", {
+        bubbles: true, composed: true,
+        detail: { endpoint: {
+          commandMetadata: { webCommandMetadata: { url, webPageType: "WEB_PAGE_TYPE_WATCH", rootVe: 3832 } },
+          watchEndpoint: start ? { videoId: id, startTimeSeconds: start } : { videoId: id },
+        } },
+      }));
+      return;
+    }
+
     const player = document.getElementById("movie_player");
+    if (e.data.type === "setVolume" && player?.setVolume) {
+      // Through the player so its own volume setting agrees
+      player.setVolume(Math.round(Math.min(1, Math.max(0, +e.data.value || 0)) * 100));
+      if (e.data.value > 0) player.unMute?.();
+      return;
+    }
     if (!player) return;
 
     if (e.data.type === "loadCaptions") {
