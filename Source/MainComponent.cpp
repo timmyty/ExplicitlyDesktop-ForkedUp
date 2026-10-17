@@ -163,6 +163,10 @@ MainComponent::MainComponent()
     pasteLyricsButton.onClick = [this] { showPasteLyrics(); };
     addAndMakeVisible (pasteLyricsButton);
 
+    geniusKeyButton.setButtonText (LyricsGuide::hasGeniusToken() ? "Genius key: set" : "Genius key");
+    geniusKeyButton.onClick = [this] { showGeniusKey(); };
+    addAndMakeVisible (geniusKeyButton);
+
     // Debug Controls
     showRawJsonToggle.setButtonText ("Show Raw JSON");
     addAndMakeVisible (showRawJsonToggle);
@@ -327,7 +331,9 @@ void MainComponent::resized()
     // Song recognition display
     songInfoLabel.setBounds (area.removeFromTop (25));
     auto songRow = area.removeFromTop (50);
-    pasteLyricsButton.setBounds (songRow.removeFromRight (120).reduced (0, 8));
+    geniusKeyButton.setBounds (songRow.removeFromRight (120).reduced (0, 8));
+    songRow.removeFromRight (6);
+    pasteLyricsButton.setBounds (songRow.removeFromRight (110).reduced (0, 8));
     songRow.removeFromRight (10);
     songInfoDisplay.setBounds (songRow);
     area.removeFromTop (10);
@@ -528,6 +534,30 @@ void MainComponent::saveSettings()
     if (isProcessing)
         settings->setValue ("autoStart", true);
     settings->saveIfNeeded();
+}
+
+void MainComponent::showGeniusKey()
+{
+    geniusKeyWindow = std::make_unique<juce::AlertWindow> ("Genius key",
+        "Paste your Genius API client access token. It is saved on this PC only "
+        "(%APPDATA%\\ExplicitlyDesktop\\genius_token.txt) and used to look up lyrics.",
+        juce::AlertWindow::NoIcon);
+    geniusKeyWindow->addTextEditor ("token", {}, "Access token", true);   // Shown as dots
+    geniusKeyWindow->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    geniusKeyWindow->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    geniusKeyWindow->enterModalState (true, juce::ModalCallbackFunction::create ([this] (int result)
+    {
+        if (result == 1 && geniusKeyWindow != nullptr)
+        {
+            auto token = geniusKeyWindow->getTextEditorContents ("token").trim();
+            if (token.isNotEmpty())
+            {
+                audioEngine->setGeniusToken (token.toStdString());
+                geniusKeyButton.setButtonText ("Genius key: set");
+            }
+        }
+        juce::MessageManager::callAsync ([this] { geniusKeyWindow.reset(); });
+    }), false);
 }
 
 void MainComponent::showPasteLyrics()

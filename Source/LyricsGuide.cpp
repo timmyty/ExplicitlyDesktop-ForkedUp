@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iostream>
 #include <regex>
+#include <cstring>
 #include <sstream>
 
 namespace
@@ -344,6 +345,16 @@ void LyricsGuide::workerLoop()
             if (! text.empty())
                 break;
         }
+        // Genius, with the user's own API key
+        auto geniusToken = geniusTokenFile().loadFileAsString().trim().toStdString();
+        if (text.empty() && ! geniusToken.empty())
+        {
+            for (auto& c : candidates)
+            {
+                text = fetchFromGenius (c, geniusToken);
+                if (! text.empty()) { src = "Genius"; break; }
+            }
+        }
         if (text.empty())
         {
             for (auto& c : candidates)
@@ -389,6 +400,154 @@ void LyricsGuide::setManualLyrics (const std::string& text)
     cache.getParentDirectory().createDirectory();
     cache.replaceWithText (juce::String ("# source: pasted\n") + juce::String (text));
     setLyricsText (key, text, "pasted");
+}
+
+//==============================================================================
+juce::File LyricsGuide::geniusTokenFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("ExplicitlyDesktop").getChildFile ("genius_token.txt");
+}
+
+void LyricsGuide::setGeniusToken (const std::string& token)
+{
+    auto file = geniusTokenFile();
+    file.getParentDirectory().createDirectory();
+    file.replaceWithText (juce::String (token).trim());
+
+    // Songs that found nothing may be found now
+    std::lock_guard<std::mutex> lock (mutex);
+    notFound.clear();
+    if (! currentKey.empty() && loadedKey != currentKey && ! searching && ! pendingKey.empty())
+    {
+        pending = true;
+        wake.notify_all();
+    }
+}
+
+bool LyricsGuide::hasGeniusToken()
+{
+    return geniusTokenFile().loadFileAsString().trim().isNotEmpty();
+}
+
+namespace
+{
+    // Index just past the </div> closing the <div ...> that starts at `start`
+    size_t endOfDiv (const std::string& html, size_t start)
+    {
+        int depth = 0;
+        size_t pos = start;
+        while (pos < html.size())
+        {
+            auto open = html.find ("<div", pos);
+            auto close = html.find ("</div>", pos);
+            if (close == std::string::npos)
+                return html.size();
+            if (open != std::string::npos && open < close)
+            {
+                ++depth;
+                pos = open + 4;
+            }
+            else
+            {
+                --depth;
+                pos = close + 6;
+                if (depth == 0)
+                    return pos;
+            }
+        }
+        return html.size();
+    }
+
+    std::string decodeEntities (std::string s)
+    {
+        static const std::pair<const char*, const char*> named[] = {
+            { "&amp;", "&" }, { "&quot;", "\"" }, { "&#x27;", "'" }, { "&#39;", "'" },
+            { "&apos;", "'" }, { "&lt;", "<" }, { "&gt;", ">" }, { "&nbsp;", " " } };
+        for (auto& [from, to] : named)
+            for (size_t p; (p = s.find (from)) != std::string::npos;)
+                s.replace (p, std::strlen (from), to);
+        return s;
+    }
+}
+
+std::string LyricsGuide::fetchFromGenius (const Candidate& c, const std::string& token) const
+{
+    // Official API: find the song and its page
+    juce::URL search ("https://api.genius.com/search");
+    search = search.withParameter ("q", juce::String (c.artist + " " + c.title));
+    auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                       .withConnectionTimeoutMs (8000)
+                       .withNumRedirectsToFollow (3)
+                       .withExtraHeaders ("Authorization: Bearer " + juce::String (token)
+                                          + "\r\nUser-Agent: ExplicitlyDesktop/1.0 (personal profanity filter)");
+    auto stream = search.createInputStream (options);
+    if (stream == nullptr)
+        return {};
+
+    auto json = juce::JSON::parse (stream->readEntireStreamAsString());
+    auto* hits = json["response"]["hits"].getArray();
+    if (hits == nullptr)
+    {
+        std::cout << "[LyricsGuide] Genius search failed (check the Genius key)" << std::endl;
+        return {};
+    }
+
+    auto wantArtist = normalizeWord (c.artist);
+    auto wantTitle = normalizeWord (c.title);
+    juce::String pageUrl;
+    for (auto& hit : *hits)
+    {
+        auto result = hit["result"];
+        auto gotArtist = normalizeWord (result["primary_artist"]["name"].toString().toStdString());
+        auto gotTitle = normalizeWord (result["title"].toString().toStdString());
+        bool artistOk = wantArtist.empty() || gotArtist.find (wantArtist) != std::string::npos
+                        || wantArtist.find (gotArtist) != std::string::npos
+                        || LyricsAlignment::calculateSimilarity (gotArtist, wantArtist) >= 0.7f;
+        bool titleOk = gotTitle.find (wantTitle) != std::string::npos || wantTitle.find (gotTitle) != std::string::npos
+                       || LyricsAlignment::calculateSimilarity (gotTitle, wantTitle) >= 0.6f;
+        if (artistOk && titleOk && result["url"].toString().startsWith ("https://genius.com/"))
+        {
+            pageUrl = result["url"].toString();
+            break;
+        }
+    }
+    if (pageUrl.isEmpty())
+        return {};
+
+    // The API has no lyrics text; it is in the song page's lyrics containers
+    auto pageOptions = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                           .withConnectionTimeoutMs (8000)
+                           .withNumRedirectsToFollow (3)
+                           .withExtraHeaders ("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ExplicitlyDesktop/1.0");
+    auto page = juce::URL (pageUrl).createInputStream (pageOptions);
+    if (page == nullptr)
+        return {};
+    auto html = page->readEntireStreamAsString().toStdString();
+
+    std::string lyricsHtml;
+    for (size_t pos = 0; (pos = html.find ("<div data-lyrics-container=\"true\"", pos)) != std::string::npos;)
+    {
+        auto end = endOfDiv (html, pos);
+        auto block = html.substr (pos, end - pos);
+
+        // Drop the "N Contributors ... Lyrics" header Genius puts inside
+        for (size_t ex; (ex = block.find ("data-exclude-from-selection=\"true\"")) != std::string::npos;)
+        {
+            auto divStart = block.rfind ("<div", ex);
+            if (divStart == std::string::npos)
+                break;
+            block.erase (divStart, endOfDiv (block, divStart) - divStart);
+        }
+        lyricsHtml += block + "<br/>";
+        pos = end;
+    }
+    if (lyricsHtml.empty())
+        return {};
+
+    lyricsHtml = std::regex_replace (lyricsHtml, std::regex ("<br\\s*/?>"), "\n");
+    lyricsHtml = std::regex_replace (lyricsHtml, std::regex ("<[^>]*>"), "");
+    return trim (decodeEntities (lyricsHtml));
 }
 
 //==============================================================================

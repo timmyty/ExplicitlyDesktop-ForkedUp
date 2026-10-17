@@ -6,7 +6,8 @@
     Uses the playing song's lyrics to check Whisper's profanity calls.
 
     The song comes from Windows' "now playing" info (Spotify, browsers).
-    Lyrics are looked up online (LRCLIB, then lyrics.ovh) on a background
+    Lyrics are looked up online (LRCLIB, then Genius with the user's own API
+    key, then lyrics.ovh) on a background
     thread and kept as a local copy under %APPDATA%\ExplicitlyDesktop\lyrics,
     so a song is only looked up once.
 
@@ -43,6 +44,10 @@ public:
 
     /** Use these lyrics for the current song and keep them as its local copy. */
     void setManualLyrics (const std::string& text);
+
+    /** Genius API key, kept in %APPDATA%\ExplicitlyDesktop\genius_token.txt. */
+    void setGeniusToken (const std::string& token);
+    static bool hasGeniusToken();
 
     struct Decision
     {
@@ -95,6 +100,8 @@ private:
     std::vector<Candidate> candidatesFor (const std::string& artist, const std::string& title) const;
     struct Lookup { enum Status { Found, NotFound, Error } status; std::string text; };
     Lookup fetchFromLrclib (const Candidate& c, bool fuzzy) const;
+    std::string fetchFromGenius (const Candidate& c, const std::string& token) const;
+    static juce::File geniusTokenFile();
     juce::File cacheFileFor (const std::string& songKey) const;
     void setLyricsText (const std::string& songKey, const std::string& text, const std::string& source);
 

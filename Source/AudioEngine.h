@@ -120,6 +120,13 @@ public:
     FilterStatus getFilterStatus() const;
     
     /** Lyrics guide state for the UI (song, where lyrics came from, following). */
+    /** Save the user's Genius API key for lyrics lookups. */
+    void setGeniusToken(const std::string& token)
+    {
+        if (lyricsGuide != nullptr)
+            lyricsGuide->setGeniusToken(token);
+    }
+
     /** Use pasted lyrics for the song playing now (saved as its local copy). */
     void setManualLyricsForCurrentSong(const std::string& text)
     {
