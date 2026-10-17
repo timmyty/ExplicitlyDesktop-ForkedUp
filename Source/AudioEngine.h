@@ -52,6 +52,13 @@ public:
     
     AudioEngine();
     ~AudioEngine() override;
+
+    struct ModelChoice { std::string name; std::string label; };
+    /** Whisper models in Models/, lightest first, labelled by performance impact. */
+    static const std::vector<ModelChoice>& availableModels();
+    /** Pick the model to use; takes effect on the next start(). */
+    void setWhisperModel(const std::string& name);
+    const std::string& getWhisperModel() const { return whisperModelName; }
     
     /**
         Start audio processing.
@@ -253,6 +260,8 @@ private:
     double overlapSeconds = 1.0;         // Audio before each chunk also transcribed, to catch boundary words
     double initialDelaySeconds = 3.0;   // Initial buffering before playback starts
     int whisperThreads = 8;              // CPU threads for Whisper (set in constructor)
+    std::string whisperModelName = "medium.en";
+    bool loadWhisperModel();
     
     // Simple level tracking for Phase 1-2
     std::atomic<float> currentInputLevel {0.0f};

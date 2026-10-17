@@ -61,6 +61,10 @@ private:
     juce::Label censorModeLabel;
     juce::ComboBox censorModeCombo;
     
+    juce::Label modelLabel;
+    juce::ComboBox modelCombo;               // Whisper model, labelled by performance impact
+    void applyModelChoice();
+
     juce::TextButton startStopButton;
     juce::TextButton filterToggleButton;   // Filter Explicit Speech on/off
     

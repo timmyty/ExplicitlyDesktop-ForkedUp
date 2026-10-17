@@ -121,50 +121,77 @@ AudioEngine::AudioEngine()
     
     lyricsGuide = std::make_unique<LyricsGuide>(profanityFilter);
     
-    // Phase 5: Load Whisper model at startup (faster "Start Processing" button response)
-    std::cout << "[Phase5] Loading Whisper model at startup..." << std::endl;
-    whisper_context_params cparams = whisper_context_default_params();
     // The CUDA build of whisper/ggml loads its backends (CUDA, CPU variants) from
-    // DLLs next to the exe; ask ggml to load them before creating the context
+    // DLLs next to the exe; ask ggml to load them before creating any context
 #ifdef _WIN32
     if (auto ggml = LoadLibraryA("ggml.dll"))
         if (auto loadAll = (void (*)()) GetProcAddress(ggml, "ggml_backend_load_all"))
             loadAll();
 #endif
-    
-    cparams.use_gpu = true;   // GPU if the CUDA backend loaded, otherwise CPU
-    cparams.flash_attn = false;  // Flash attention turns DTW off
-    cparams.dtw_token_timestamps = true;  // Per-word timestamps for accurate muting
-    
-    // Model (EXPLICITLY_WHISPER_MODEL=tiny.en|base.en|small.en|medium.en).
-    // medium.en needs the GPU: each 2s chunk must finish within the 1s left of the
-    // 3s delay. On the CPU only base.en keeps up (small.en ~1.6s, medium.en ~5s).
-    std::string modelName = "medium.en";
+
+    // The model is loaded by start() (or loadWhisperModel); the UI picks which one.
+    // EXPLICITLY_WHISPER_MODEL overrides the default for testing
     if (auto* m = std::getenv("EXPLICITLY_WHISPER_MODEL"))
-        modelName = m;
-    if (modelName == "tiny.en")        cparams.dtw_aheads_preset = WHISPER_AHEADS_TINY_EN;
-    else if (modelName == "base.en")   cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
-    else if (modelName == "medium.en") cparams.dtw_aheads_preset = WHISPER_AHEADS_MEDIUM_EN;
-    else if (modelName == "small.en")  cparams.dtw_aheads_preset = WHISPER_AHEADS_SMALL_EN;
-    else                               { modelName = "base.en"; cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN; }
-    
-    whisperCtx = whisper_init_from_file_with_params(("Models/ggml-" + modelName + ".bin").c_str(), cparams);
-    std::cout << "[Phase5] Whisper model: " << modelName << std::endl;
-    
-    if (whisperCtx == nullptr)
+        whisperModelName = m;
+}
+
+const std::vector<AudioEngine::ModelChoice>& AudioEngine::availableModels()
+{
+    // Each 2s slice must be transcribed within the ~1s left of the 3s delay.
+    // Measured here: on the CPU only base.en keeps up; on an RTX 4090 all do
+    static const std::vector<ModelChoice> models = {
+        { "tiny.en",   "tiny.en - lightest load, least accurate (75 MB)" },
+        { "base.en",   "base.en - light load, fine on CPU (148 MB)" },
+        { "small.en",  "small.en - medium load, needs a GPU (488 MB)" },
+        { "medium.en", "medium.en - heaviest load, most accurate, needs a GPU (1.5 GB)" },
+    };
+    return models;
+}
+
+void AudioEngine::setWhisperModel(const std::string& name)
+{
+    bool known = false;
+    for (auto& m : availableModels())
+        known = known || m.name == name;
+    if (!known || name == whisperModelName)
+        return;
+
+    whisperModelName = name;
+    if (!isRunning && whisperCtx != nullptr)
     {
-        std::cout << "[Phase5] ERROR: Failed to load Whisper model at startup" << std::endl;
+        whisper_free(whisperCtx);   // Loaded on the next start()
+        whisperCtx = nullptr;
     }
-    else
-    {
-        std::cout << "[Phase5] Whisper model loaded successfully" << std::endl;
-    }
+}
+
+bool AudioEngine::loadWhisperModel()
+{
+    if (whisperCtx != nullptr)
+        return true;
+
+    whisper_context_params cparams = whisper_context_default_params();
+    cparams.use_gpu = true;              // GPU if the CUDA backend loaded, otherwise CPU
+    cparams.flash_attn = false;          // Flash attention turns DTW off
+    cparams.dtw_token_timestamps = true; // Per-word timestamps for accurate muting
+
+    const auto& name = whisperModelName;
+    if (name == "tiny.en")        cparams.dtw_aheads_preset = WHISPER_AHEADS_TINY_EN;
+    else if (name == "base.en")   cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+    else if (name == "small.en")  cparams.dtw_aheads_preset = WHISPER_AHEADS_SMALL_EN;
+    else                          cparams.dtw_aheads_preset = WHISPER_AHEADS_MEDIUM_EN;
+
+    std::cout << "[Phase5] Loading Whisper model " << name << "..." << std::endl;
+    whisperCtx = whisper_init_from_file_with_params(("Models/ggml-" + name + ".bin").c_str(), cparams);
+    std::cout << "[Phase5] Whisper model " << name << (whisperCtx ? " loaded" : " FAILED to load") << std::endl;
+    return whisperCtx != nullptr;
 }
 
 AudioEngine::~AudioEngine()
 {
     *uiAlive = false;
     stop();
+    if (whisperCtx != nullptr)
+        whisper_free(whisperCtx);
 }
 
 bool AudioEngine::start(const juce::String& inputDeviceName,
@@ -232,7 +259,8 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
     std::cout << "[Phase2] Output device: " << device->getOutputChannelNames().joinIntoString(", ") << std::endl;
     std::cout << "[Phase2] ==============================" << std::endl;
     
-    // Phase 5: Check if Whisper model was loaded at startup
+    // Phase 5: Load the chosen Whisper model (kept loaded between starts)
+    loadWhisperModel();
     if (whisperCtx == nullptr)
     {
         std::cout << "[Phase5] ERROR: Whisper model not loaded - was there an error at startup?" << std::endl;
@@ -369,8 +397,12 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
         mediaInfoInitialized = false;
         
         // Fallback: Initialize Chromaprint + AcoustID
-        std::string fpcalcPath = "C:\\\\Users\\\\andre\\\\Desktop\\\\Explicitly\\\\chromaprint-fpcalc-1.6.0-windows-x86_64\\\\fpcalc.exe";
-        std::string acoustidKey = "bNfeKNh59F";
+        // No keys or personal paths in the source: AcoustID needs your own free
+        // client key (https://acoustid.org/api-key) and Chromaprint's fpcalc
+        const char* fpcalcEnv = std::getenv("EXPLICITLY_FPCALC");
+        const char* acoustidEnv = std::getenv("EXPLICITLY_ACOUSTID_KEY");
+        std::string fpcalcPath = fpcalcEnv != nullptr ? fpcalcEnv : "fpcalc.exe";
+        std::string acoustidKey = acoustidEnv != nullptr ? acoustidEnv : "";
         
         if (songRecognition.initialize(fpcalcPath, acoustidKey))
         {
@@ -425,12 +457,8 @@ void AudioEngine::stop()
         std::cout << "[Phase5] Background thread stopped" << std::endl;
     }
     
-    // Cleanup Whisper
-    if (whisperCtx)
-    {
-        whisper_free(whisperCtx);
-        whisperCtx = nullptr;
-    }
+    // The Whisper model stays loaded so Start works again after Stop (it is freed
+    // in the destructor, or when a different model is picked)
     
     isRunning = false;
     

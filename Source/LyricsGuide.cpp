@@ -353,7 +353,13 @@ void LyricsGuide::workerLoop()
         auto cache = cacheFileFor (key);
         if (cache.existsAsFile())
         {
-            setLyricsText (key, cache.loadFileAsString().toStdString(), "local copy");
+            // Saved copies start with "# source: <site>"
+            auto saved = cache.loadFileAsString();
+            auto origin = saved.startsWith ("# source:") ? saved.upToFirstOccurrenceOf ("\n", false, false)
+                                                               .fromFirstOccurrenceOf (":", false, false).trim()
+                                                         : juce::String();
+            setLyricsText (key, saved.toStdString(),
+                           (origin.isNotEmpty() ? origin + ", " : juce::String()).toStdString() + "temp local copy");
             continue;
         }
 

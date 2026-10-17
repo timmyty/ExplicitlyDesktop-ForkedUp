@@ -23,7 +23,7 @@ sd.wait()
 print("Recording complete! Saving...")
 
 # Save as WAV
-output_file = r"C:\Users\andre\Desktop\Explicitly\desktop\build\bin\Release\speech.wav"
+output_file = "speech.wav"  # Saved in the current folder
 wav.write(output_file, sample_rate, recording)
 
 print(f"Saved to: {output_file}")

@@ -54,6 +54,17 @@ MainComponent::MainComponent()
     censorModeCombo.setSelectedId (2);  // Default: Mute
     addAndMakeVisible (censorModeCombo);
     
+    // Whisper model picker (lightest to heaviest)
+    modelLabel.setText ("Whisper Model:", juce::dontSendNotification);
+    addAndMakeVisible (modelLabel);
+    {
+        int id = 1;
+        for (auto& m : AudioEngine::availableModels())
+            modelCombo.addItem (m.label, id++);
+    }
+    modelCombo.onChange = [this] { applyModelChoice(); };
+    addAndMakeVisible (modelCombo);
+
     // Start/Stop Button
     startStopButton.setButtonText ("Start Processing");
     startStopButton.onClick = [this] 
@@ -294,7 +305,10 @@ void MainComponent::resized()
     // Censor Mode
     auto censorRow = area.removeFromTop (30);
     censorModeLabel.setBounds (censorRow.removeFromLeft (120));
-    censorModeCombo.setBounds (censorRow.removeFromLeft (200));
+    censorModeCombo.setBounds (censorRow.removeFromLeft (120));
+    censorRow.removeFromLeft (20);
+    modelLabel.setBounds (censorRow.removeFromLeft (110));
+    modelCombo.setBounds (censorRow);
     area.removeFromTop (20);
     
     // Start/Stop Button
@@ -526,6 +540,19 @@ void MainComponent::restoreSettings()
     }
     censorModeCombo.setSelectedId (settings->getIntValue ("censorMode", 2), juce::dontSendNotification);
     audioEngine->setFilterEnabled (settings->getBoolValue ("filterEnabled", true));
+
+    // Whisper model (EXPLICITLY_WHISPER_MODEL, if set, wins for testing)
+    if (std::getenv ("EXPLICITLY_WHISPER_MODEL") == nullptr)
+        audioEngine->setWhisperModel (settings->getValue ("whisperModel", "medium.en").toStdString());
+    {
+        int id = 1;
+        for (auto& m : AudioEngine::availableModels())
+        {
+            if (m.name == audioEngine->getWhisperModel())
+                modelCombo.setSelectedId (id, juce::dontSendNotification);
+            ++id;
+        }
+    }
     updateFilterButton();
     
     // Apps routed to VB-CABLE are silent unless we're processing, so start
@@ -545,6 +572,7 @@ void MainComponent::saveSettings()
         settings->setValue ("outputDevice", outputDeviceCombo.getText());
     settings->setValue ("censorMode", censorModeCombo.getSelectedId());
     settings->setValue ("filterEnabled", audioEngine->isFilterEnabled());
+    settings->setValue ("whisperModel", juce::String (audioEngine->getWhisperModel()));
     if (isProcessing)
         settings->setValue ("autoStart", true);
     settings->saveIfNeeded();
@@ -670,6 +698,26 @@ void MainComponent::updateLyricsStatus()
     {
         songInfoDisplay.setText (text, juce::dontSendNotification);
         songInfoDisplay.setColour (juce::Label::textColourId, colour);
+    }
+}
+
+void MainComponent::applyModelChoice()
+{
+    int index = modelCombo.getSelectedId() - 1;
+    const auto& models = AudioEngine::availableModels();
+    if (index < 0 || index >= (int) models.size() || models[(size_t) index].name == audioEngine->getWhisperModel())
+        return;
+
+    // Switching models needs a restart of processing (the new model loads on start)
+    bool wasProcessing = isProcessing;
+    if (wasProcessing)
+        stopProcessing();
+    audioEngine->setWhisperModel (models[(size_t) index].name);
+    saveSettings();
+    if (wasProcessing)
+    {
+        statusValueLabel.setText ("Loading " + juce::String (models[(size_t) index].name) + "...", juce::dontSendNotification);
+        juce::MessageManager::callAsync ([this] { startProcessing(); });
     }
 }
 
