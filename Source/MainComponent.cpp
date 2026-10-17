@@ -517,6 +517,13 @@ void MainComponent::restoreSettings()
     
     bool haveInput = selectByText (inputDeviceCombo, settings->getValue ("inputDevice"));
     bool haveOutput = selectByText (outputDeviceCombo, settings->getValue ("outputDevice"));
+    
+    // Testing: EXPLICITLY_OUTPUT_DEVICE plays to another device without saving it
+    if (auto* testOutput = std::getenv ("EXPLICITLY_OUTPUT_DEVICE"))
+    {
+        haveOutput = selectByText (outputDeviceCombo, testOutput);
+        outputOverridden = haveOutput;
+    }
     censorModeCombo.setSelectedId (settings->getIntValue ("censorMode", 2), juce::dontSendNotification);
     audioEngine->setFilterEnabled (settings->getBoolValue ("filterEnabled", true));
     updateFilterButton();
@@ -534,7 +541,8 @@ void MainComponent::saveSettings()
         return;
     
     settings->setValue ("inputDevice", inputDeviceCombo.getText());
-    settings->setValue ("outputDevice", outputDeviceCombo.getText());
+    if (! outputOverridden)
+        settings->setValue ("outputDevice", outputDeviceCombo.getText());
     settings->setValue ("censorMode", censorModeCombo.getSelectedId());
     settings->setValue ("filterEnabled", audioEngine->isFilterEnabled());
     if (isProcessing)

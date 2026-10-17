@@ -106,6 +106,10 @@ void ControlServer::handleConnection (juce::StreamingSocket& client)
     {
         body = statusJson();
     }
+    else if (method == "POST" && path == "/debug/dump")
+    {
+        body = audioEngine.dumpDebugRecording() ? "{\"dumped\":true}" : "{\"dumped\":false}";
+    }
     else if (method == "POST" && path.startsWith ("/filter/"))
     {
         auto action = path.fromLastOccurrenceOf ("/", false, false);

@@ -89,6 +89,10 @@ public:
         (empty when there are none). */
     std::string getFullLyrics() const;
 
+    /** Upcoming lyrics around where the song is, as a hint for Whisper (empty
+        without lyrics). Steers it to hear the sung words, not "upbeat music". */
+    std::string getPrompt() const;
+
     /** Text normalisation shared with the matcher: lowercase ASCII letters/digits. */
     static std::string normalizeWord (const std::string& word);
 

@@ -132,6 +132,22 @@ LyricsGuide::Status LyricsGuide::getStatus() const
     return s;
 }
 
+std::string LyricsGuide::getPrompt() const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    if (lyrics.empty() || loadedKey != currentKey)
+        return {};
+
+    // A few words back and ~35 ahead of the last match (or the song's start)
+    int from = lastPosition >= 0 ? std::max (0, lastPosition - 8) : 0;
+    int to = std::min ((int) lyrics.size(), from + 45);
+    std::string prompt;
+    for (int j = from; j < to; ++j)
+        if (lyrics[j].text != "*")
+            prompt += (prompt.empty() ? "" : " ") + lyrics[j].text;
+    return prompt;
+}
+
 std::string LyricsGuide::getFullLyrics() const
 {
     std::lock_guard<std::mutex> lock (mutex);
@@ -659,16 +675,23 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
     d.aligned = strong || continuing;
     following = d.aligned;
 
-    if (! d.aligned)
+    // A looser match is still used to mute profane lyrics Whisper missed (fast
+    // rap or screaming rarely matches well); a wrong extra mute costs less than a
+    // swear getting through. Clearing Whisper's hits needs the solid match
+    bool loose = matched >= 2 && matched >= 0.3 * spanWhisper;
+    if (! d.aligned && ! loose)
         return d;
 
-    lastPosition = bj;
+    if (d.aligned)
+        lastPosition = bj;
 
     // Karaoke cues: the first Whisper-timed word of each matched line says when
     // that line starts being sung
     d.songGeneration = songGeneration;
     for (auto& op : ops)
     {
+        if (! d.aligned)
+            break;
         if (op.i < 0 || op.j < 0)
             continue;
         int line = lyrics[op.j].line;
@@ -684,7 +707,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
     int firstJ = -1;
     for (auto& op : ops)
         if (op.j >= 0) { firstJ = op.j; break; }
-    if (firstJ >= 0)
+    if (firstJ >= 0 && d.aligned)
     {
         for (int line = lyrics[firstJ].line; line <= lyrics[bj - 1].line && line < (int) lyricLines.size(); ++line)
             d.lyricsLines += (d.lyricsLines.empty() ? "" : "  /  ") + lyricLines[line];
@@ -701,7 +724,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
             // Whisper word paired with a lyrics word. Only trust "clean" when the two
             // sound alike (a mishearing like "sit"/"shit"), not when an edited copy of
             // the lyrics swapped the word out, and never from a censored copy
-            d.lyricsSayClean[op.i] = ! lyricProfane (op.j) && ! lyricsCensored
+            d.lyricsSayClean[op.i] = d.aligned && ! lyricProfane (op.j) && ! lyricsCensored
                                      && sim[op.i][op.j] >= 0.5f;
 
             bool whisperProfane = profanityFilter.isProfane (w[op.i]);
@@ -739,7 +762,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
         }
     }
 
-    std::cout << "[LyricsGuide] Aligned " << matched << "/" << n << " words at lyrics word "
+    std::cout << "[LyricsGuide] " << (d.aligned ? "Aligned " : "Loosely aligned ") << matched << "/" << n << " words at lyrics word "
               << (bj - (int) ops.size() + 1) << "-" << bj << std::endl;
     return d;
 }

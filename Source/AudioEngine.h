@@ -95,6 +95,9 @@ public:
     */
     bool isBufferUnderrun() const;
 
+    /** Debug: save the rolling input/output recording (EXPLICITLY_DEBUG_ROLLING_SECONDS). */
+    bool dumpDebugRecording();
+
     /**
         Filter Explicit Speech toggle. Safe to call from any thread.
 
@@ -323,6 +326,7 @@ private:
     size_t debugRecordPos = 0;
     std::atomic<bool> debugRecordFull{false};
     bool debugRecordWritten = false;
+    bool debugRolling = false;
     std::atomic<bool> wasWaiting{false};
     int debugCounter = 0;
     double bufferCaptureTime = 0.0;

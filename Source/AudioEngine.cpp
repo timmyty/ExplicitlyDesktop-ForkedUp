@@ -276,12 +276,22 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
     if (auto* dir = std::getenv("EXPLICITLY_DEBUG_RECORD"))
     {
         debugRecordDir = dir;
-        debugInput.assign((size_t) sampleRate * 60, 0.0f);
-        debugOutput.assign((size_t) sampleRate * 60, 0.0f);
+        // EXPLICITLY_DEBUG_ROLLING_SECONDS=N keeps the last N seconds instead, saved
+        // on request (POST /debug/dump on the control port)
+        int seconds = 60;
+        debugRolling = false;
+        if (auto* rolling = std::getenv("EXPLICITLY_DEBUG_ROLLING_SECONDS"))
+        {
+            seconds = juce::jlimit(10, 1800, std::atoi(rolling));
+            debugRolling = true;
+        }
+        debugInput.assign((size_t) sampleRate * seconds, 0.0f);
+        debugOutput.assign((size_t) sampleRate * seconds, 0.0f);
         debugRecordPos = 0;
         debugRecordFull.store(false);
         debugRecordWritten = false;
-        std::cout << "[Debug] Recording 60s of input/output to " << debugRecordDir << std::endl;
+        std::cout << "[Debug] Recording " << seconds << "s of input/output"
+                  << (debugRolling ? " (rolling)" : "") << " to " << debugRecordDir << std::endl;
     }
     
     // Phase 5: Start background Whisper thread
@@ -503,6 +513,28 @@ AudioEngine::FilterStatus AudioEngine::getFilterStatus() const
     }
 
     return status;
+}
+
+bool AudioEngine::dumpDebugRecording()
+{
+    if (debugRecordDir.empty() || !debugRolling || debugInput.empty())
+        return false;
+
+    // Oldest sample first (the ring keeps being written meanwhile; fine for debugging)
+    size_t size = debugInput.size();
+    size_t pos = debugRecordPos;
+    size_t count = std::min(pos, size);
+    std::vector<float> in(count), out(count);
+    for (size_t k = 0; k < count; ++k)
+    {
+        size_t at = (pos - count + k) % size;
+        in[k] = debugInput[at];
+        out[k] = debugOutput[at];
+    }
+    saveWavFile(debugRecordDir + "/debug_input.wav", in, sampleRate);
+    saveWavFile(debugRecordDir + "/debug_output.wav", out, sampleRate);
+    std::cout << "[Debug] Dumped last " << (double) count / sampleRate << "s of input/output" << std::endl;
+    return true;
 }
 
 bool AudioEngine::isBufferUnderrun() const
@@ -868,11 +900,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
             }
         }
         
-        if (!debugRecordDir.empty() && debugRecordPos < debugInput.size())
+        if (!debugRecordDir.empty() && (debugRolling || debugRecordPos < debugInput.size()))
         {
-            debugInput[debugRecordPos] = inputChannelData[0] != nullptr ? inputChannelData[0][i] : 0.0f;
-            debugOutput[debugRecordPos] = outputChannelData[0] != nullptr ? outputChannelData[0][i] : 0.0f;
-            if (++debugRecordPos == debugInput.size())
+            size_t at = debugRecordPos % debugInput.size();
+            debugInput[at] = inputChannelData[0] != nullptr ? inputChannelData[0][i] : 0.0f;
+            debugOutput[at] = outputChannelData[0] != nullptr ? outputChannelData[0][i] : 0.0f;
+            if (++debugRecordPos == debugInput.size() && !debugRolling)
                 debugRecordFull.store(true);
         }
         
@@ -1136,7 +1169,7 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         wparams.language = "en";
         wparams.n_threads = whisperThreads;
         wparams.single_segment = false;
-        wparams.token_timestamps = false;
+        wparams.token_timestamps = true;   // Second timing estimate besides DTW
         wparams.max_len = 0;
         
         // Speed optimizations (valid parameters only)
@@ -1145,6 +1178,14 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         wparams.temperature_inc = 0.2f;  // Try multiple decoding strategies (0, 0.2, 0.4, 0.6, 0.8, 1.0)
         wparams.entropy_thold = 5.0f;  // Don't skip uncertain segments (music has high entropy)
         wparams.logprob_thold = -1.0f;  // Accept lower probability tokens (faster)
+        
+        // Over loud music Whisper often answers "(upbeat music)". Suppress those
+        // non-speech tokens, and when the song's lyrics are known, prompt with the
+        // lines around where we are so it hears the sung words
+        wparams.suppress_nst = true;
+        std::string lyricsPrompt = lyricsGuide->getPrompt();
+        if (!lyricsPrompt.empty())
+            wparams.initial_prompt = lyricsPrompt.c_str();
         
         // Run transcription
         int result = whisper_full(whisperCtx, wparams, audioBuffer16k.data(), (int)audioBuffer16k.size());
@@ -1168,7 +1209,8 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         std::vector<WordSegment> transcribedWords;
         bool allDtw = true;
         
-        struct PendingWord { std::string text; double start; double last; };
+        struct PendingWord { std::string text; double start; double last; double ts0; double ts1; };
+        std::vector<std::pair<double, double>> tokenTimes;   // Per word: token-timestamp start/end
         
         for (int i = 0; i < numSegments; ++i)
         {
@@ -1195,11 +1237,12 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                     haveDtw = false;
                 
                 if (startsWord)
-                    words.push_back({ piece, token.t_dtw * 0.01, token.t_dtw * 0.01 });
+                    words.push_back({ piece, token.t_dtw * 0.01, token.t_dtw * 0.01, token.t0 * 0.01, token.t1 * 0.01 });
                 else
                 {
                     words.back().text += piece;
                     words.back().last = token.t_dtw * 0.01;
+                    words.back().ts1 = token.t1 * 0.01;
                 }
             }
             
@@ -1226,6 +1269,7 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 wordStart = std::max(0.0, std::min(windowSeconds, wordStart));
                 wordEnd = std::max(wordStart + 0.05, std::min(windowSeconds, wordEnd));
                 transcribedWords.emplace_back(words[k].text, wordStart, wordEnd, 0.9f);
+                tokenTimes.push_back({ words[k].ts0, words[k].ts1 });
             }
         }
         
@@ -1382,7 +1426,16 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
             }
             
             if (foundProfanity)
+            {
+                if (idx < tokenTimes.size())
+                    std::cout << "[Timing] \"" << profanityText << "\" dtw " << profanityStart << "-" << profanityEnd
+                              << " token-ts " << tokenTimes[idx].first << "-"
+                              << tokenTimes[std::min(tokenTimes.size() - 1, idx + (isMultiWord ? 1 : 0))].second
+                              << " window-start-abs "
+                              << (double)((long long) debugRecordPos - (long long)((delayWritePos - windowStartPos + delayBufferSize) % delayBufferSize)) / sampleRate
+                              << std::endl;
                 hits.push_back({ profanityText, profanityStart, profanityEnd, isMultiWord });
+            }
         }
         
         // Profane lyrics words that Whisper misheard or missed
@@ -1514,8 +1567,10 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 juce::ignoreUnused(chunkEndPos);
                 
                 // Correct Whisper's late word starts (startBias, above) and pad a little
-                double paddingBefore = 0.15;
-                double paddingAfter = 0.05;   // Keep the following word audible
+                // Measured on a real song (sung over loud music) with the rolling
+                // debug recording: starts varied -0.16..+0.18s, ends up to +0.4s
+                double paddingBefore = 0.25;
+                double paddingAfter = 0.20;   // Short enough to keep the next word audible
                 
                 // Words the lyrics placed for us are already in real time
                 double bias = hit.finalTimes ? 0.0 : startBias;
