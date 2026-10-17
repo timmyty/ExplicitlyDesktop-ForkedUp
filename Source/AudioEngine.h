@@ -120,6 +120,13 @@ public:
     FilterStatus getFilterStatus() const;
     
     /** Lyrics guide state for the UI (song, where lyrics came from, following). */
+    /** Use pasted lyrics for the song playing now (saved as its local copy). */
+    void setManualLyricsForCurrentSong(const std::string& text)
+    {
+        if (lyricsGuide != nullptr)
+            lyricsGuide->setManualLyrics(text);
+    }
+
     LyricsGuide::Status getLyricsStatus() const
     {
         return lyricsGuide != nullptr ? lyricsGuide->getStatus() : LyricsGuide::Status();

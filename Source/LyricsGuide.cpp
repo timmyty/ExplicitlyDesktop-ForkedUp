@@ -78,7 +78,18 @@ void LyricsGuide::setSong (const std::string& artist, const std::string& title)
     {
         std::lock_guard<std::mutex> lock (mutex);
         if (key == currentKey)
+        {
+            // Same song: retry a failed lookup once its wait is over
+            auto it = notFound.find (key);
+            bool retry = loadedKey != key && ! searching && ! pending && it != notFound.end()
+                         && juce::Time::getMillisecondCounterHiRes() >= it->second;
+            if (! retry)
+                return;
+            notFound.erase (it);
+            pendingArtist = artist; pendingTitle = title; pendingKey = key; pending = true;
+            wake.notify_all();
             return;
+        }
 
         currentKey = key;
         currentSong = artist.empty() ? title : artist + " - " + title;
@@ -93,7 +104,10 @@ void LyricsGuide::setSong (const std::string& artist, const std::string& title)
 
         std::cout << "[LyricsGuide] Now playing: " << currentSong << std::endl;
 
-        if (loadedKey == key || notFound.count (key) > 0)
+        if (loadedKey == key)
+            return;
+        auto nf = notFound.find (key);
+        if (nf != notFound.end() && juce::Time::getMillisecondCounterHiRes() < nf->second)
             return;
 
         pendingArtist = artist;
@@ -128,23 +142,52 @@ juce::File LyricsGuide::cacheFileFor (const std::string& songKey) const
 std::vector<LyricsGuide::Candidate> LyricsGuide::candidatesFor (const std::string& artist, const std::string& title) const
 {
     std::vector<Candidate> out;
-    auto t = cleanTitle (title);
+    auto add = [&out] (std::string a, std::string t)
+    {
+        a = cleanArtist (a);
+        t = cleanTitle (t);
+        if (t.empty())
+            return;
+        for (auto& c : out)
+            if (c.artist == a && c.title == t)
+                return;
+        out.push_back ({ a, t });
+    };
 
-    // YouTube titles are usually "Artist - Song"; the "artist" is the channel
+    // Spotify-style suffixes: "Song - Acoustic", "Song - From 'Film' / Soundtrack
+    // Version", "Song - Remastered 2011", "Song - Live at ..."
+    auto baseTitle = std::regex_replace (title,
+        std::regex ("\\s+[-\xE2\x80\x93]\\s+(acoustic|live|remaster|remastered|radio edit|single|mono|stereo|explicit|clean|from |bonus|demo|version|edit|mix|remix|\\d{4} remaster).*$",
+                    std::regex::icase), "");
+
+    // Several artists ("A, B & C", "A feat. B"): try the first one too
+    auto firstArtist = std::regex_replace (artist, std::regex ("\\s*(,|&|\\bfeat\\.?|\\bft\\.?|\\bx\\b|\\bwith\\b).*$", std::regex::icase), "");
+
+    add (artist, baseTitle);
+    add (firstArtist, baseTitle);
+    if (baseTitle != title)
+        add (artist, title);
+
+    // YouTube titles are usually "Artist - Song", and the "artist" is the channel
     std::smatch m;
-    if (std::regex_match (t, m, std::regex ("(.+?)\\s+[-\xE2\x80\x93\xE2\x80\x94]+\\s+(.+)")))
-        out.push_back ({ cleanArtist (m[1].str()), cleanTitle (m[2].str()) });
+    auto yt = cleanTitle (title);
+    if (std::regex_match (yt, m, std::regex ("(.+?)\\s+[-\xE2\x80\x93\xE2\x80\x94]+\\s+(.+)")))
+        add (m[1].str(), m[2].str());
 
-    out.push_back ({ cleanArtist (artist), t });
     return out;
 }
 
-std::string LyricsGuide::fetchFromLrclib (const Candidate& c) const
+LyricsGuide::Lookup LyricsGuide::fetchFromLrclib (const Candidate& c, bool fuzzy) const
 {
     juce::URL url ("https://lrclib.net/api/search");
-    url = url.withParameter ("track_name", juce::String (c.title));
-    if (! c.artist.empty())
-        url = url.withParameter ("artist_name", juce::String (c.artist));
+    if (fuzzy)
+        url = url.withParameter ("q", juce::String (c.artist + " " + c.title));
+    else
+    {
+        url = url.withParameter ("track_name", juce::String (c.title));
+        if (! c.artist.empty())
+            url = url.withParameter ("artist_name", juce::String (c.artist));
+    }
 
     auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
                        .withConnectionTimeoutMs (8000)
@@ -153,21 +196,36 @@ std::string LyricsGuide::fetchFromLrclib (const Candidate& c) const
 
     auto stream = url.createInputStream (options);
     if (stream == nullptr)
-        return {};
+        return { Lookup::Error, {} };
 
     auto json = juce::JSON::parse (stream->readEntireStreamAsString());
-    if (auto* results = json.getArray())
+    auto* results = json.getArray();
+    if (results == nullptr)
+        return { Lookup::Error, {} };   // e.g. {"name":"ServerOverloaded"}: try again later
+
+    // Only accept a result for the same song: the artist must match, and the
+    // title must be close (fuzzy search returns all sorts)
+    auto wantArtist = normalizeWord (c.artist);
+    auto wantTitle = normalizeWord (c.title);
+    for (auto& r : *results)
     {
-        for (auto& r : *results)
-        {
-            if ((bool) r["instrumental"])
-                continue;
-            auto plain = r["plainLyrics"].toString();
-            if (plain.isNotEmpty())
-                return plain.toStdString();
-        }
+        if ((bool) r["instrumental"])
+            continue;
+        auto plain = r["plainLyrics"].toString();
+        if (plain.isEmpty())
+            continue;
+
+        auto gotArtist = normalizeWord (r["artistName"].toString().toStdString());
+        auto gotTitle = normalizeWord (r["trackName"].toString().toStdString());
+        bool artistOk = wantArtist.empty() || gotArtist.find (wantArtist) != std::string::npos
+                        || wantArtist.find (gotArtist) != std::string::npos
+                        || LyricsAlignment::calculateSimilarity (gotArtist, wantArtist) >= 0.7f;
+        bool titleOk = gotTitle.find (wantTitle) != std::string::npos || wantTitle.find (gotTitle) != std::string::npos
+                       || LyricsAlignment::calculateSimilarity (gotTitle, wantTitle) >= 0.6f;
+        if (artistOk && titleOk)
+            return { Lookup::Found, plain.toStdString() };
     }
-    return {};
+    return { Lookup::NotFound, {} };
 }
 
 void LyricsGuide::setLyricsText (const std::string& songKey, const std::string& text, const std::string& src)
@@ -260,7 +318,8 @@ void LyricsGuide::workerLoop()
             pending = false;
         }
 
-        // Local copy first, so each song is only looked up online once
+        // Local copy first (pasted, or found earlier), so each song is only
+        // looked up online once
         auto cache = cacheFileFor (key);
         if (cache.existsAsFile())
         {
@@ -271,18 +330,25 @@ void LyricsGuide::workerLoop()
         { std::lock_guard<std::mutex> lock (mutex); searching = true; }
 
         std::string text, src;
-        for (auto& c : candidatesFor (artist, title))
+        bool hadError = false;
+        auto candidates = candidatesFor (artist, title);
+
+        for (bool fuzzy : { false, true })
         {
-            if (c.title.empty())
-                continue;
-            text = fetchFromLrclib (c);
-            if (! text.empty()) { src = "LRCLIB"; break; }
+            for (auto& c : candidates)
+            {
+                auto result = fetchFromLrclib (c, fuzzy);
+                hadError = hadError || result.status == Lookup::Error;
+                if (result.status == Lookup::Found) { text = result.text; src = "LRCLIB"; break; }
+            }
+            if (! text.empty())
+                break;
         }
         if (text.empty())
         {
-            for (auto& c : candidatesFor (artist, title))
+            for (auto& c : candidates)
             {
-                if (c.artist.empty() || c.title.empty())
+                if (c.artist.empty())
                     continue;
                 text = LyricsAlignment::fetchLyricsFromOvh (c.artist, c.title).lyrics;
                 if (! text.empty()) { src = "lyrics.ovh"; break; }
@@ -293,9 +359,13 @@ void LyricsGuide::workerLoop()
 
         if (text.empty())
         {
-            std::cout << "[LyricsGuide] No lyrics found for " << artist << " - " << title << std::endl;
+            std::cout << "[LyricsGuide] No lyrics found for " << artist << " - " << title
+                      << (hadError ? " (a lookup failed; will retry)" : "") << std::endl;
             std::lock_guard<std::mutex> lock (mutex);
-            notFound.insert (key);
+            // A busy or unreachable site is retried after a minute; a clean "no
+            // match" after an hour, in case lyrics get added
+            notFound[key] = juce::Time::getMillisecondCounterHiRes()
+                            + (hadError ? 60.0 * 1000.0 : 60.0 * 60.0 * 1000.0);
             continue;
         }
 
@@ -303,6 +373,22 @@ void LyricsGuide::workerLoop()
         cache.replaceWithText (juce::String ("# source: ") + src + "\n" + juce::String (text));
         setLyricsText (key, text, src);
     }
+}
+
+void LyricsGuide::setManualLyrics (const std::string& text)
+{
+    std::string key;
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+        key = currentKey;
+    }
+    if (key.empty() || juce::String (text).trim().isEmpty())
+        return;
+
+    auto cache = cacheFileFor (key);
+    cache.getParentDirectory().createDirectory();
+    cache.replaceWithText (juce::String ("# source: pasted\n") + juce::String (text));
+    setLyricsText (key, text, "pasted");
 }
 
 //==============================================================================

@@ -102,6 +102,11 @@ private:
     juce::Label songInfoLabel;
     juce::Label songInfoDisplay;
     
+    juce::TextButton pasteLyricsButton;      // Paste lyrics for the song playing now
+    std::unique_ptr<juce::AlertWindow> pasteLyricsWindow;
+    std::unique_ptr<juce::TextEditor> pasteLyricsEditor;
+    void showPasteLyrics();
+
     juce::ToggleButton showRawJsonToggle;
     juce::TextButton exportLogButton;
     

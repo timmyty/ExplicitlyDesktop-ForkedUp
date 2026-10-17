@@ -29,7 +29,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <set>
+#include <map>
 #include <thread>
 
 class LyricsGuide
@@ -40,6 +40,9 @@ public:
 
     /** Tell the guide what is playing. Cheap to call repeatedly; any thread. */
     void setSong (const std::string& artist, const std::string& title);
+
+    /** Use these lyrics for the current song and keep them as its local copy. */
+    void setManualLyrics (const std::string& text);
 
     struct Decision
     {
@@ -90,7 +93,8 @@ private:
 
     void workerLoop();
     std::vector<Candidate> candidatesFor (const std::string& artist, const std::string& title) const;
-    std::string fetchFromLrclib (const Candidate& c) const;
+    struct Lookup { enum Status { Found, NotFound, Error } status; std::string text; };
+    Lookup fetchFromLrclib (const Candidate& c, bool fuzzy) const;
     juce::File cacheFileFor (const std::string& songKey) const;
     void setLyricsText (const std::string& songKey, const std::string& text, const std::string& source);
 
@@ -110,7 +114,7 @@ private:
     bool following = false;
     int lastPosition = -1;
     int songGeneration = 0;
-    std::set<std::string> notFound;         // Songs already looked up without success
+    std::map<std::string, double> notFound; // Song -> when to look it up again (ms counter)
 
     // Background lookup
     std::thread worker;

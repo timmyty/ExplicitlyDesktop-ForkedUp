@@ -158,6 +158,11 @@ MainComponent::MainComponent()
     songInfoDisplay.setColour (juce::Label::textColourId, juce::Colours::yellow);
     addAndMakeVisible (songInfoDisplay);
     
+    // Paste lyrics (from any site) for the song playing now
+    pasteLyricsButton.setButtonText ("Paste lyrics");
+    pasteLyricsButton.onClick = [this] { showPasteLyrics(); };
+    addAndMakeVisible (pasteLyricsButton);
+
     // Debug Controls
     showRawJsonToggle.setButtonText ("Show Raw JSON");
     addAndMakeVisible (showRawJsonToggle);
@@ -321,7 +326,10 @@ void MainComponent::resized()
     
     // Song recognition display
     songInfoLabel.setBounds (area.removeFromTop (25));
-    songInfoDisplay.setBounds (area.removeFromTop (50));
+    auto songRow = area.removeFromTop (50);
+    pasteLyricsButton.setBounds (songRow.removeFromRight (120).reduced (0, 8));
+    songRow.removeFromRight (10);
+    songInfoDisplay.setBounds (songRow);
     area.removeFromTop (10);
     
     // Debug displays - split remaining area
@@ -520,6 +528,38 @@ void MainComponent::saveSettings()
     if (isProcessing)
         settings->setValue ("autoStart", true);
     settings->saveIfNeeded();
+}
+
+void MainComponent::showPasteLyrics()
+{
+    auto status = audioEngine->getLyricsStatus();
+    if (status.song.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon, "Paste lyrics",
+                                                "Play the song first, so the lyrics can be saved for it.");
+        return;
+    }
+
+    pasteLyricsEditor = std::make_unique<juce::TextEditor>();
+    pasteLyricsEditor->setMultiLine (true, true);
+    pasteLyricsEditor->setReturnKeyStartsNewLine (true);
+    pasteLyricsEditor->setScrollbarsShown (true);
+    pasteLyricsEditor->setSize (520, 320);
+
+    pasteLyricsWindow = std::make_unique<juce::AlertWindow> ("Paste lyrics",
+        "Lyrics for " + juce::String (status.song) + ". They are kept for this song "
+        "and replace any lyrics found online.", juce::AlertWindow::NoIcon);
+    pasteLyricsWindow->addCustomComponent (pasteLyricsEditor.get());
+    pasteLyricsWindow->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::ctrlModifier, 0));
+    pasteLyricsWindow->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    pasteLyricsWindow->enterModalState (true, juce::ModalCallbackFunction::create ([this] (int result)
+    {
+        if (result == 1 && pasteLyricsEditor != nullptr)
+            audioEngine->setManualLyricsForCurrentSong (pasteLyricsEditor->getText().toStdString());
+        if (pasteLyricsWindow != nullptr)
+            pasteLyricsWindow->removeCustomComponent (0);
+        juce::MessageManager::callAsync ([this] { pasteLyricsWindow.reset(); pasteLyricsEditor.reset(); });
+    }), false);
 }
 
 void MainComponent::updateLyricsStatus()
