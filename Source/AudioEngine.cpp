@@ -1084,11 +1084,13 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         // heard whole in the next window
         const double windowSeconds = chunkSeconds + overlapSeconds;
         
-        // DTW marks a word's first token near where that token finishes, so word
-        // starts come out late; ends (the next word's DTW time) are close. Measured
-        // on medium.en with a test clip of known word positions
-        // (EXPLICITLY_DEBUG_RECORD): starts +0.24..+0.33s, ends -0.12..+0.01s.
+        // DTW marks each token near where it finishes, so a word's first-token time
+        // is late for its start, and its last-token time is just before its end.
+        // Measured on medium.en with a test clip of known word positions
+        // (EXPLICITLY_DEBUG_RECORD): starts +0.24..+0.33s late; ending words at the
+        // next word's start instead clipped the following word in songs.
         const double startBias = -0.30;
+        const double dtwEndOffset = 0.13;   // Word end after its last token's DTW time
         const int windowSamples = (int)(sampleRate * windowSeconds);
         const int windowStartPos = ((int)captureTime - windowSamples + delayBufferSize) % delayBufferSize;
         std::vector<float> bufferCopy((size_t) windowSamples);
@@ -1166,7 +1168,7 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         std::vector<WordSegment> transcribedWords;
         bool allDtw = true;
         
-        struct PendingWord { std::string text; double start; };
+        struct PendingWord { std::string text; double start; double last; };
         
         for (int i = 0; i < numSegments; ++i)
         {
@@ -1193,9 +1195,12 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                     haveDtw = false;
                 
                 if (startsWord)
-                    words.push_back({ piece, token.t_dtw * 0.01 });
+                    words.push_back({ piece, token.t_dtw * 0.01, token.t_dtw * 0.01 });
                 else
+                {
                     words.back().text += piece;
+                    words.back().last = token.t_dtw * 0.01;
+                }
             }
             
             allDtw = allDtw && haveDtw;
@@ -1204,8 +1209,12 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 double wordStart, wordEnd;
                 if (haveDtw)
                 {
+                    // DTW marks each token near where it finishes: the word ends just
+                    // after its last token's time (never past the next word's start)
                     wordStart = words[k].start;
-                    wordEnd = (k + 1 < words.size()) ? words[k + 1].start : segEndSec;
+                    wordEnd = words[k].last + dtwEndOffset;
+                    if (k + 1 < words.size())
+                        wordEnd = std::min(wordEnd, words[k + 1].start);
                 }
                 else
                 {
@@ -1457,7 +1466,7 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 
                 // Correct Whisper's late word starts (startBias, above) and pad a little
                 double paddingBefore = 0.15;
-                double paddingAfter = 0.18;
+                double paddingAfter = 0.05;   // Keep the following word audible
                 
                 // Words the lyrics placed for us are already in real time
                 double bias = hit.finalTimes ? 0.0 : startBias;
