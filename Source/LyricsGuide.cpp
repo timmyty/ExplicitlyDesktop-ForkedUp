@@ -233,6 +233,7 @@ void LyricsGuide::setLyricsText (const std::string& songKey, const std::string& 
 
     lyrics = std::move (words);
     lyricLines = std::move (displayLines);
+    ++songGeneration;
     lyricsCensored = censoredCopy;
     loadedKey = songKey;
     source = src;
@@ -399,6 +400,22 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
         return d;
 
     lastPosition = bj;
+
+    // Karaoke cues: the first Whisper-timed word of each matched line says when
+    // that line starts being sung
+    d.songGeneration = songGeneration;
+    for (auto& op : ops)
+    {
+        if (op.i < 0 || op.j < 0)
+            continue;
+        int line = lyrics[op.j].line;
+        if (! d.lineCues.empty() && d.lineCues.back().line == line)
+            continue;
+        if (line < 0 || line >= (int) lyricLines.size())
+            continue;
+        d.lineCues.push_back ({ line, std::max (0.0, whisperWords[op.i].start + startBias), lyricLines[line],
+                                line + 1 < (int) lyricLines.size() ? lyricLines[line + 1] : std::string() });
+    }
 
     // Lines covered by this chunk, for the "Actual Lyrics" display
     int firstJ = -1;

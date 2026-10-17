@@ -54,6 +54,12 @@ public:
         std::vector<std::string> extraMuteWords;
         // Lyrics line(s) this chunk matched, profanity masked, for display
         std::string lyricsLines;
+
+        // Karaoke cues: when each matched line starts (seconds in the chunk, real
+        // time), with its text and the line after it (profanity masked)
+        struct LineCue { int line; double start; std::string text; std::string next; };
+        std::vector<LineCue> lineCues;
+        int songGeneration = 0;     // Changes when the lyrics change (new song)
     };
 
     /** Called on the transcription thread for each chunk. */
@@ -103,6 +109,7 @@ private:
     bool searching = false;
     bool following = false;
     int lastPosition = -1;
+    int songGeneration = 0;
     std::set<std::string> notFound;         // Songs already looked up without success
 
     // Background lookup

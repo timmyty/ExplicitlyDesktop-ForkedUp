@@ -127,7 +127,7 @@ MainComponent::MainComponent()
     addAndMakeVisible (liveLyricsLabel);
     
     liveLyricsDisplay.setText ("", juce::dontSendNotification);
-    liveLyricsDisplay.setFont (juce::Font (28.0f, juce::Font::bold));
+    liveLyricsDisplay.setFont (juce::Font (20.0f, juce::Font::bold));
     liveLyricsDisplay.setJustificationType (juce::Justification::centred);
     liveLyricsDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::darkgrey);
     liveLyricsDisplay.setColour (juce::Label::textColourId, juce::Colours::lightblue);
@@ -139,7 +139,7 @@ MainComponent::MainComponent()
     addAndMakeVisible (actualLyricsLabel);
     
     actualLyricsDisplay.setText ("", juce::dontSendNotification);
-    actualLyricsDisplay.setFont (juce::Font (26.0f, juce::Font::bold));
+    actualLyricsDisplay.setFont (juce::Font (24.0f, juce::Font::bold));
     actualLyricsDisplay.setMinimumHorizontalScale (0.5f);
     actualLyricsDisplay.setJustificationType (juce::Justification::centred);
     actualLyricsDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::black);
@@ -311,12 +311,12 @@ void MainComponent::resized()
     
     // Actual lyrics display (large, prominent - shows correct lyrics)
     actualLyricsLabel.setBounds (area.removeFromTop (25));
-    actualLyricsDisplay.setBounds (area.removeFromTop (70));
+    actualLyricsDisplay.setBounds (area.removeFromTop (90));   // Current line + next line
     area.removeFromTop (5);
     
     // Live lyrics display (shows what Whisper heard)
     liveLyricsLabel.setBounds (area.removeFromTop (25));
-    liveLyricsDisplay.setBounds (area.removeFromTop (60));
+    liveLyricsDisplay.setBounds (area.removeFromTop (40));
     area.removeFromTop (10);
     
     // Song recognition display

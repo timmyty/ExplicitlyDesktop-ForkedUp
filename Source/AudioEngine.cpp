@@ -1393,36 +1393,85 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                              guide.extraMuteIsFinal[k] });
         }
         
-        // Show what was heard, and the matching lyrics, when this chunk is actually
-        // heard: its middle plays (delay - chunk/2) after capture, minus the time
-        // transcription already took
+        // Displays. Audio at offset t in this window is heard (gap - (window - t))
+        // after capture; transcription has already used `elapsed` of that.
         {
+            double elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
+            double gap = getCurrentBufferSize();
+            auto msUntilHeard = [&](double t) {
+                return juce::jmax(0, (int)((gap - (windowSeconds - t) - elapsed) * 1000.0));
+            };
+            auto alive = uiAlive;
+            
+            // "Whisper Heard": what was heard in the new part of the window, shown
+            // as its middle plays
             juce::String heard;
             for (const auto& wordSeg : transcribedWords)
-                heard += juce::String(wordSeg.word) + " ";
+                if (wordSeg.start >= overlapSeconds)
+                    heard += juce::String(wordSeg.word) + " ";
             heard = heard.trim();
             if (heard.removeCharacters(" ").equalsIgnoreCase("BLANKAUDIO"))   // Whisper's [BLANK_AUDIO]
                 heard = {};
             
-            bool haveLyrics = lyricsGuide->getStatus().hasLyrics;
-            juce::String lyricsText = guide.aligned ? juce::String(guide.lyricsLines)
-                                    : (haveLyrics ? juce::String() : heard);
-            
-            double elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
-            int waitMs = juce::jmax(0, (int)((getCurrentBufferSize() - chunkSeconds / 2.0 - elapsed) * 1000.0));
-            std::cout << "[Display] in " << waitMs << "ms: lyrics=\"" << lyricsText << "\"" << std::endl;
-            auto alive = uiAlive;
-            
-            juce::MessageManager::callAsync([this, alive, heard, lyricsText, waitMs]() {
-                juce::Timer::callAfterDelay(waitMs, [this, alive, heard, lyricsText]() {
-                    if (!*alive)
-                        return;
-                    if (lyricsCallback && heard.isNotEmpty())
-                        lyricsCallback(heard);
-                    if (actualLyricsCallback && lyricsText.isNotEmpty())
-                        actualLyricsCallback(lyricsText);
+            if (heard.isNotEmpty())
+            {
+                int waitMs = msUntilHeard(overlapSeconds + chunkSeconds / 2.0);
+                juce::MessageManager::callAsync([this, alive, heard, waitMs]() {
+                    juce::Timer::callAfterDelay(waitMs, [this, alive, heard]() {
+                        if (*alive && lyricsCallback)
+                            lyricsCallback(heard);
+                    });
                 });
-            });
+            }
+            
+            // "Actual Lyrics", karaoke style: each lyric line appears a moment before
+            // it is sung, with the next line underneath. Overlapping windows repeat
+            // lines, so each line is cued once (unless the song jumps back, e.g. a
+            // repeated section, or a new song starts)
+            const double karaokeLeadSeconds = 0.6;
+            if (guide.songGeneration != lastCueGeneration)
+            {
+                lastCueGeneration = guide.songGeneration;
+                lastCuedLine = -1;
+            }
+            
+            for (const auto& cue : guide.lineCues)
+            {
+                if (cue.line <= lastCuedLine && cue.line > lastCuedLine - 4)
+                    continue;
+                lastCuedLine = cue.line;
+                
+                juce::String text = juce::String(cue.text);
+                if (!cue.next.empty())
+                    text << juce::newLine << juce::String(cue.next);
+                
+                int waitMs = juce::jmax(0, msUntilHeard(cue.start) - (int)(karaokeLeadSeconds * 1000.0));
+                std::cout << "[Karaoke] line " << cue.line << " in " << waitMs << "ms" << std::endl;
+                int line = cue.line;
+                juce::MessageManager::callAsync([this, alive, text, waitMs, line]() {
+                    juce::Timer::callAfterDelay(waitMs, [this, alive, text, line]() {
+                        if (!*alive)
+                            return;
+                        if (!debugRecordDir.empty())
+                            std::cout << "[Karaoke] showing line " << line << " at output "
+                                      << (double) debugRecordPos / sampleRate << "s" << std::endl;
+                        if (actualLyricsCallback)
+                            actualLyricsCallback(text);
+                    });
+                });
+            }
+            
+            // No lyrics for this song: show Whisper's words there instead
+            if (!lyricsGuide->getStatus().hasLyrics && heard.isNotEmpty())
+            {
+                int waitMs = msUntilHeard(overlapSeconds);
+                juce::MessageManager::callAsync([this, alive, heard, waitMs]() {
+                    juce::Timer::callAfterDelay(waitMs, [this, alive, heard]() {
+                        if (*alive && actualLyricsCallback)
+                            actualLyricsCallback(heard);
+                    });
+                });
+            }
         }
         
         // Process the detected profanity (single or multi-word)

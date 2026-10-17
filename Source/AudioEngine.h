@@ -249,6 +249,8 @@ private:
     std::unique_ptr<LyricsGuide> lyricsGuide;  // Checks Whisper against the song's lyrics
     struct CensorRecord { int pos; int length; std::chrono::steady_clock::time_point when; };
     std::vector<CensorRecord> recentCensors;   // Stretches censored recently (windows overlap)
+    int lastCuedLine = -1;          // Karaoke: last lyric line scheduled for display
+    int lastCueGeneration = -1;
     std::shared_ptr<bool> uiAlive = std::make_shared<bool>(true);  // Guards delayed UI updates
     double lastMediaPollTime = 0.0;
     
