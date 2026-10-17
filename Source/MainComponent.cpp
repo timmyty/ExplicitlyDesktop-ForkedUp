@@ -246,7 +246,7 @@ MainComponent::MainComponent()
                 
                 // Clear actual lyrics display to show "Loading new lyrics..."
                 recentActualLyrics.clear();
-                actualLyricsDisplay.setText("🔄 Loading lyrics...", juce::dontSendNotification);
+                actualLyricsDisplay.setText("Loading lyrics...", juce::dontSendNotification);
                 actualLyricsDisplay.setColour(juce::Label::textColourId, juce::Colours::cyan);
                 
                 // Also flash the background to indicate song change
@@ -757,7 +757,7 @@ void MainComponent::updateLatencyDisplay()
         // Show warning if buffer is critically low
         if (isUnderrun)
         {
-            latencyValueLabel.setText ("⚠ UNDERRUN - UNCENSORED", juce::dontSendNotification);
+            latencyValueLabel.setText ("UNDERRUN - UNCENSORED", juce::dontSendNotification);
             latencyValueLabel.setColour (juce::Label::textColourId, juce::Colours::red);
         }
         else
