@@ -21,7 +21,7 @@
 
 MainComponent::MainComponent()
 {
-    setSize (900, 700);
+    setSize (900, 780);
     
     // Title
     titleLabel.setText ("Explicitly Desktop - Real-Time Filter", juce::dontSendNotification);
@@ -338,7 +338,7 @@ void MainComponent::resized()
     
     // Actual lyrics display (large, prominent - shows correct lyrics)
     actualLyricsLabel.setBounds (area.removeFromTop (25));
-    actualLyricsDisplay.setBounds (area.removeFromTop (90));   // Current line + next line
+    actualLyricsDisplay.setBounds (area.removeFromTop (140));  // Previous, current and next two lines
     area.removeFromTop (5);
     
     // Live lyrics display (shows what Whisper heard)

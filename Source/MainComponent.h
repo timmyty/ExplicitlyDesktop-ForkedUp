@@ -23,6 +23,45 @@
 #include "AudioEngine.h"
 #include "ControlServer.h"
 
+/** "Actual Lyrics" panel. Plain text draws like a Label; four newline-separated
+    lines (previous, current, next, after next) draw karaoke style with the
+    current line highlighted. */
+class LyricsPanel : public juce::Label
+{
+public:
+    void paint (juce::Graphics& g) override
+    {
+        juce::StringArray lines;   // Split by hand so empty lines are kept
+        auto text = getText();
+        for (int start = 0;;)
+        {
+            int nl = text.indexOfChar (start, (juce::juce_wchar) 10);   // '\n'
+            lines.add (text.substring (start, nl < 0 ? text.length() : nl));
+            if (nl < 0)
+                break;
+            start = nl + 1;
+        }
+        if (lines.size() != 4)
+        {
+            juce::Label::paint (g);
+            return;
+        }
+
+        g.fillAll (findColour (juce::Label::backgroundColourId));
+        auto area = getLocalBounds().reduced (10, 4);
+        float rowHeight = (float) area.getHeight() / 4.0f;
+
+        for (int i = 0; i < 4; ++i)
+        {
+            bool current = (i == 1);
+            g.setColour (current ? juce::Colours::white : juce::Colours::grey);
+            g.setFont (juce::FontOptions (current ? 26.0f : 19.0f, current ? juce::Font::bold : juce::Font::plain));
+            auto row = area.removeFromTop ((int) rowHeight);
+            g.drawFittedText (lines[i], row, juce::Justification::centred, 1, 0.5f);
+        }
+    }
+};
+
 class MainComponent  : public juce::Component,
                        public juce::Timer
 {
@@ -100,7 +139,7 @@ private:
     
     // Actual lyrics display (aligned/corrected)
     juce::Label actualLyricsLabel;
-    juce::Label actualLyricsDisplay;
+    LyricsPanel actualLyricsDisplay;
     
     // Song recognition display
     juce::Label songInfoLabel;

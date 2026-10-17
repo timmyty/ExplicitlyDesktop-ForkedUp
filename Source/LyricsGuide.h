@@ -66,7 +66,8 @@ public:
 
         // Karaoke cues: when each matched line starts (seconds in the chunk, real
         // time), with its text and the line after it (profanity masked)
-        struct LineCue { int line; double start; std::string text; std::string next; };
+        struct LineCue { int line; double start; std::string previous; std::string text;
+                         std::string next; std::string afterNext; };
         std::vector<LineCue> lineCues;
         int songGeneration = 0;     // Changes when the lyrics change (new song)
     };

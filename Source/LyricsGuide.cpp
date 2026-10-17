@@ -705,8 +705,9 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
             continue;
         if (line < 0 || line >= (int) lyricLines.size())
             continue;
-        d.lineCues.push_back ({ line, std::max (0.0, whisperWords[op.i].start + startBias), lyricLines[line],
-                                line + 1 < (int) lyricLines.size() ? lyricLines[line + 1] : std::string() });
+        auto lineAt = [this] (int l) { return l >= 0 && l < (int) lyricLines.size() ? lyricLines[(size_t) l] : std::string(); };
+        d.lineCues.push_back ({ line, std::max (0.0, whisperWords[op.i].start + startBias),
+                                lineAt (line - 1), lyricLines[line], lineAt (line + 1), lineAt (line + 2) });
     }
 
     // Lines covered by this chunk, for the "Actual Lyrics" display

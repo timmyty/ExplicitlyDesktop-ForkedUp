@@ -1152,7 +1152,7 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         // Measured on medium.en with a test clip of known word positions
         // (EXPLICITLY_DEBUG_RECORD): starts +0.24..+0.33s late; ending words at the
         // next word's start instead clipped the following word in songs.
-        const double startBias = -0.25;   // Lets the first consonant through
+        const double startBias = -0.28;
         const double dtwEndOffset = 0.13;   // Word end after its last token's DTW time
         const int windowSamples = (int)(sampleRate * windowSeconds);
         const int windowStartPos = ((int)captureTime - windowSamples + delayBufferSize) % delayBufferSize;
@@ -1524,9 +1524,10 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                     continue;
                 lastCuedLine = cue.line;
                 
-                juce::String text = juce::String(cue.text);
-                if (!cue.next.empty())
-                    text << juce::newLine << juce::String(cue.next);
+                // Four lines: previous, current, next, the one after (the panel
+                // highlights the second)
+                juce::String text;
+                text << cue.previous << "\n" << cue.text << "\n" << cue.next << "\n" << cue.afterNext;
                 
                 int waitMs = juce::jmax(0, msUntilHeard(cue.start) - (int)(karaokeLeadSeconds * 1000.0));
                 std::cout << "[Karaoke] line " << cue.line << " in " << waitMs << "ms" << std::endl;
@@ -1599,8 +1600,8 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 // Correct Whisper's late word starts (startBias, above) and pad a little
                 // Keep mutes tight: a leading "f" sound is fine, a muted neighbour
                 // word is not
-                double paddingBefore = 0.0;
-                double paddingAfter = 0.08;
+                double paddingBefore = 0.05;
+                double paddingAfter = 0.15;
                 
                 // Words the lyrics placed for us are already in real time
                 double bias = hit.finalTimes ? 0.0 : startBias;
@@ -1640,10 +1641,17 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                         int overlap = offset < done.length ? std::min(newLen, done.length - offset)
                                     : (back < newLen ? std::min(done.length, newLen - back) : 0);
                         if (overlap > newLen * 3 / 10)
-                            alreadyDone = true;
+                        {
+                            // Same word found again by the next window. If the two
+                            // estimates mostly agree, muting both covers the word
+                            // better; if they are far apart (that once muted ~2s),
+                            // keep only the first. Reverse mode never repeats
+                            int unionLen = newLen + done.length - overlap;
+                            bool agree = unionLen <= (std::max(newLen, done.length) * 3) / 2;
+                            if (!agree || currentCensorMode == CensorMode::Reverse)
+                                alreadyDone = true;
+                        }
                     }
-                    // The next window often finds the same word with a slightly
-                    // different time; muting both made one word mute for ~2s
                     if (alreadyDone)
                     {
                         std::cout << "[Phase6] \"" << profanityText << "\" already censored (overlap)" << std::endl;
