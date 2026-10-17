@@ -97,6 +97,7 @@ void LyricsGuide::setSong (const std::string& artist, const std::string& title)
         following = false;
         lastPosition = -1;
         chunksSinceAligned = 1000;
+        lastHeardJ = -1;
 
         if (loadedKey != key)
         {
@@ -607,7 +608,7 @@ float LyricsGuide::wordSimilarity (const std::string& a, const std::string& b)
 }
 
 LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds,
-                                            double startBias)
+                                            double startBias, double windowStreamStart)
 {
     Decision d;
     d.lyricsSayClean.assign (whisperWords.size(), false);
@@ -707,6 +708,61 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
 
     if (d.aligned)
         lastPosition = bj;
+
+    // Words Whisper skipped between slices: the lyrics run on from the last word
+    // heard in an earlier slice to the first word heard in this one, so any
+    // profane lyric words in between were sung in that gap. Each gets its share
+    // of the gap's time (no extra padding)
+    if (d.aligned && lastHeardJ >= 0)
+    {
+        int firstI = -1, firstJ = -1;
+        for (auto& op : ops)
+            if (op.i >= 0 && op.j >= 0 && sim[op.i][op.j] >= matchThreshold) { firstI = op.i; firstJ = op.j; break; }
+
+        int skipped = firstJ - lastHeardJ - 1;
+        double gapStart = lastHeardEnd;
+        double gapEnd = firstI >= 0 ? windowStreamStart + whisperWords[firstI].start + startBias : 0.0;
+        double slot = skipped > 0 ? (gapEnd - gapStart) / skipped : 0.0;
+
+        if (firstJ >= 0 && skipped > 0 && skipped <= 12 && slot > 0.08 && slot <= 0.8)
+        {
+            for (int k = lastHeardJ + 1; k < firstJ; ++k)
+            {
+                if (! lyrics[k].profane)
+                    continue;
+                double start = gapStart + (k - lastHeardJ - 1) * slot - windowStreamStart;
+                double end = start + slot;
+                if (end <= 0.0)
+                    continue;   // Already played
+                d.extraMutes.push_back ({ std::max (0.0, start), end });
+                d.extraMuteIsFinal.push_back (true);
+                d.extraMuteWords.push_back (lyrics[k].text + " (skipped by Whisper)");
+            }
+        }
+    }
+
+    // Remember the last lyric word actually heard, for the next slice
+    if (d.aligned)
+    {
+        for (auto it = ops.rbegin(); it != ops.rend(); ++it)
+        {
+            if (it->i >= 0 && it->j >= 0 && sim[it->i][it->j] >= matchThreshold)
+            {
+                // Overlapping slices hear the same words again; keep the furthest
+                double end = windowStreamStart + whisperWords[it->i].end;
+                if (it->j > lastHeardJ || it->j < lastHeardJ - 20)
+                {
+                    lastHeardJ = it->j;
+                    lastHeardEnd = end;
+                }
+                break;
+            }
+        }
+    }
+    else if (chunksSinceAligned > 3)
+    {
+        lastHeardJ = -1;   // Lost the song: don't guess across a long gap
+    }
 
     // Karaoke cues: the first Whisper-timed word of each matched line says when
     // that line starts being sung

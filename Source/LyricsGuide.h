@@ -73,7 +73,8 @@ public:
     };
 
     /** Called on the transcription thread for each chunk. */
-    Decision analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds, double startBias);
+    Decision analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds, double startBias,
+                      double windowStreamStart);
 
     struct Status
     {
@@ -132,6 +133,8 @@ private:
     bool following = false;
     int lastPosition = -1;
     int chunksSinceAligned = 1000;         // Chunks since the last solid match
+    int lastHeardJ = -1;                   // Last lyric word Whisper actually heard...
+    double lastHeardEnd = 0.0;             // ...and when it ended (stream seconds)
     int songGeneration = 0;
     std::map<std::string, double> notFound; // Song -> when to look it up again (ms counter)
 
