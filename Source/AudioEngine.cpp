@@ -241,6 +241,19 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
     std::cout << "[Phase6] Initial positions: writePos=" << delayWritePos 
               << ", readPos=" << delayReadPos << " (playback paused until buffered)" << std::endl;
     
+    // Debug recording of input/output for timing measurements
+    debugRecordDir.clear();
+    if (auto* dir = std::getenv("EXPLICITLY_DEBUG_RECORD"))
+    {
+        debugRecordDir = dir;
+        debugInput.assign((size_t) sampleRate * 60, 0.0f);
+        debugOutput.assign((size_t) sampleRate * 60, 0.0f);
+        debugRecordPos = 0;
+        debugRecordFull.store(false);
+        debugRecordWritten = false;
+        std::cout << "[Debug] Recording 60s of input/output to " << debugRecordDir << std::endl;
+    }
+    
     // Phase 5: Start background Whisper thread
     shouldStopThread.store(false);
     hasNewBuffer.store(false);
@@ -893,6 +906,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
             }
         }
         
+        if (!debugRecordDir.empty() && debugRecordPos < debugInput.size())
+        {
+            debugInput[debugRecordPos] = inputChannelData[0] != nullptr ? inputChannelData[0][i] : 0.0f;
+            debugOutput[debugRecordPos] = outputChannelData[0] != nullptr ? outputChannelData[0][i] : 0.0f;
+            if (++debugRecordPos == debugInput.size())
+                debugRecordFull.store(true);
+        }
+        
         // Always advance write position
         delayWritePos = (delayWritePos + 1) % delayBufferSize;
         
@@ -1066,6 +1087,14 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
     if (!whisperCtx)
         return;
     
+    if (debugRecordFull.load() && !debugRecordWritten)
+    {
+        debugRecordWritten = true;
+        saveWavFile(debugRecordDir + "/debug_input.wav", debugInput, sampleRate);
+        saveWavFile(debugRecordDir + "/debug_output.wav", debugOutput, sampleRate);
+        std::cout << "[Debug] Wrote debug_input.wav and debug_output.wav" << std::endl;
+    }
+    
     try
     {
         // Calculate delay duration for timestamp calculation
@@ -1150,72 +1179,68 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         // Without this, KV cache grows indefinitely and RTF increases over time
         whisper_reset_timings(whisperCtx);
         
-        // Extract word-level segments using SEGMENT timestamps (more reliable than token timestamps)
+        // Extract words with per-token DTW timestamps (enabled on the context via
+        // dtw_token_timestamps). Tokens are sub-words, so tokens are grouped into
+        // words at leading spaces. A word runs from its first token's DTW time to
+        // the next word's first token. Falls back to spreading words evenly over
+        // the segment if DTW times are unavailable.
         int numSegments = whisper_full_n_segments(whisperCtx);
         std::vector<WordSegment> transcribedWords;
         
-        std::cout << "[Phase6] Using segment-level timestamps (token timestamps unreliable)" << std::endl;
+        struct PendingWord { std::string text; double start; };
         
         for (int i = 0; i < numSegments; ++i)
         {
-            // Get segment-level timestamps (these are accurate!)
-            int64_t segmentStart = whisper_full_get_segment_t0(whisperCtx, i);
-            int64_t segmentEnd = whisper_full_get_segment_t1(whisperCtx, i);
-            double segStartSec = segmentStart * 0.01;  // centiseconds to seconds
-            double segEndSec = segmentEnd * 0.01;
+            double segStartSec = whisper_full_get_segment_t0(whisperCtx, i) * 0.01;
+            double segEndSec = whisper_full_get_segment_t1(whisperCtx, i) * 0.01;
             
-            // Get all tokens in this segment
+            std::vector<PendingWord> words;
+            bool haveDtw = true;
+            
             int numTokens = whisper_full_n_tokens(whisperCtx, i);
-            std::vector<std::string> segmentWords;
-            
             for (int j = 0; j < numTokens; ++j)
             {
                 whisper_token_data token = whisper_full_get_token_data(whisperCtx, i, j);
-                
-                // Skip special tokens
                 if (token.id >= whisper_token_eot(whisperCtx))
+                    continue;  // Special tokens
+                
+                std::string raw = whisper_full_get_token_text(whisperCtx, i, j);
+                bool startsWord = words.empty() || (! raw.empty() && raw[0] == ' ');
+                std::string piece = cleanTranscriptText(raw);
+                if (piece.empty())
                     continue;
                 
-                const char* tokenText = whisper_full_get_token_text(whisperCtx, i, j);
-                std::string word = cleanTranscriptText(tokenText);
+                if (token.t_dtw < 0)
+                    haveDtw = false;
                 
-                if (!word.empty())
-                    segmentWords.push_back(word);
+                if (startsWord)
+                    words.push_back({ piece, token.t_dtw * 0.01 });
+                else
+                    words.back().text += piece;
             }
             
-            // Distribute words evenly across segment duration
-            if (!segmentWords.empty())
+            for (size_t k = 0; k < words.size(); ++k)
             {
-                double segmentDuration = segEndSec - segStartSec;
-                double wordDuration = segmentDuration / segmentWords.size();
-                
-                for (size_t k = 0; k < segmentWords.size(); ++k)
+                double wordStart, wordEnd;
+                if (haveDtw)
                 {
-                    double wordStart = segStartSec + (k * wordDuration);
-                    double wordEnd = wordStart + wordDuration;
-                    
-                    // Clamp to 0-5 second range
-                    wordStart = std::max(0.0, std::min(5.0, wordStart));
-                    wordEnd = std::max(wordStart + 0.05, std::min(5.0, wordEnd));
-                    
-                    transcribedWords.emplace_back(
-                        segmentWords[k],
-                        wordStart,
-                        wordEnd,
-                        0.9f  // Confidence (not available at segment level)
-                    );
+                    wordStart = words[k].start;
+                    wordEnd = (k + 1 < words.size()) ? words[k + 1].start : segEndSec;
                 }
+                else
+                {
+                    double wordDuration = (segEndSec - segStartSec) / words.size();
+                    wordStart = segStartSec + k * wordDuration;
+                    wordEnd = wordStart + wordDuration;
+                }
+                
+                wordStart = std::max(0.0, std::min(chunkSeconds, wordStart));
+                wordEnd = std::max(wordStart + 0.05, std::min(chunkSeconds, wordEnd));
+                transcribedWords.emplace_back(words[k].text, wordStart, wordEnd, 0.9f);
             }
         }
         
-        std::cout << "[Phase5] Extracted " << transcribedWords.size() << " word segments" << std::endl;
-        
-        // Phase 6: Refine timestamps using audio energy analysis
-        std::cout << "[Phase6] Refining timestamps..." << std::endl;
-        for (auto& word : transcribedWords)
-        {
-            timestampRefiner.refineWordTimestamp(word, bufferCopy, sampleRate);
-        }
+        std::cout << "[Phase5] Extracted " << transcribedWords.size() << " words (DTW timestamps)" << std::endl;
         
         // Apply lyrics alignment if enabled (sliding window approach)
         std::vector<WordSegment> finalWords = transcribedWords;
@@ -1477,15 +1502,21 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 int chunkEndPos = (int)captureTime;
                 int chunkStartPos = (chunkEndPos - (int)(sampleRate * chunkSeconds) + delayBufferSize) % delayBufferSize;
                 
-                // Tiny model tends to timestamp late - use asymmetric padding
-                double paddingBefore = 0.4;  // 400ms before word (catch early starts)
-                double paddingAfter = 0.1;   // 100ms after word (tight end)
+                // DTW times run early: measured with a test clip of known word positions
+                // (debug recording via EXPLICITLY_DEBUG_RECORD), starts were 0.24-0.40s
+                // early and ends 0.25-0.51s early. Shift by the typical bias, then pad
+                // (more before than after, since a clipped word onset is the most audible)
+                // so the whole word is covered.
+                double dtwBias = 0.30;
+                double paddingBefore = 0.42;
+                double paddingAfter = 0.30;
                 
-                int startSample = (int)((profanityStart - paddingBefore) * sampleRate);
-                int endSample = (int)((profanityEnd + paddingAfter) * sampleRate);
+                int startSample = (int)((profanityStart + dtwBias - paddingBefore) * sampleRate);
+                int endSample = (int)((profanityEnd + dtwBias + paddingAfter) * sampleRate);
                 
-                // Clamp to valid range (0 to chunkSeconds)
-                int maxSample = (int)(sampleRate * chunkSeconds);
+                // Clamp to the chunk, allowing a little past its end for the bias and
+                // padding: transcription takes ~0.6s, so that audio is already buffered
+                int maxSample = (int)(sampleRate * (chunkSeconds + 0.4));
                 startSample = std::max(0, std::min(startSample, maxSample));
                 endSample = std::max(startSample, std::min(endSample, maxSample));
                 

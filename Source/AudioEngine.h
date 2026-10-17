@@ -280,6 +280,14 @@ private:
     std::atomic<bool> playbackStarted{false};
     std::atomic<bool> outputPaused{false};    // Output silenced while the delay buffer rebuilds
     std::atomic<bool> filterEnabled{true};    // Filter Explicit Speech toggle
+    
+    // Debug: EXPLICITLY_DEBUG_RECORD=<folder> records the first 60s of input
+    // and output (mono) to WAVs, for measuring censor timing
+    std::string debugRecordDir;
+    std::vector<float> debugInput, debugOutput;
+    size_t debugRecordPos = 0;
+    std::atomic<bool> debugRecordFull{false};
+    bool debugRecordWritten = false;
     std::atomic<bool> wasWaiting{false};
     int debugCounter = 0;
     double bufferCaptureTime = 0.0;
