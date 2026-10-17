@@ -114,12 +114,24 @@ public:
     */
     void setFilterEnabled(bool enabled);
     bool isFilterEnabled() const { return filterEnabled.load(); }
+    
+    /** Pass audio straight through (no delay, no muting) for the next few
+        seconds. The browser extension renews this while it mutes a YouTube
+        video itself from the video's captions, so that audio isn't delayed. */
+    void setBypassLease(double seconds)
+    {
+        bypassUntilMs.store(juce::Time::getMillisecondCounterHiRes() + seconds * 1000.0);
+    }
+    bool isBypassed() const { return juce::Time::getMillisecondCounterHiRes() < bypassUntilMs.load(); }
+    
+    const ProfanityFilter& getProfanityFilter() const { return profanityFilter; }
 
     struct FilterStatus
     {
         bool running = false;
         bool enabled = false;
         bool buffering = false;      // Filter on but output silent while the delay refills
+        bool bypassed = false;       // Filter on, but passed through for caption muting
         double delaySeconds = 0.0;   // Delay between input and output (0 when filter is off)
     };
 
@@ -330,6 +342,8 @@ private:
     std::atomic<bool> playbackStarted{false};
     std::atomic<bool> outputPaused{false};    // Output silenced while the delay buffer rebuilds
     std::atomic<bool> filterEnabled{true};    // Filter Explicit Speech toggle
+    std::atomic<double> bypassUntilMs{0.0};   // See setBypassLease
+    bool filterActive() const { return filterEnabled.load() && !isBypassed(); }
     
     // Debug: EXPLICITLY_DEBUG_RECORD=<folder> records the first 60s of input
     // and output (mono) to WAVs, for measuring censor timing

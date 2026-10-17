@@ -761,6 +761,8 @@ void MainComponent::updateFilterButton()
     juce::String text = "Filter Explicit Speech: ";
     if (! status.enabled)
         text << "OFF (no delay)";
+    else if (status.bypassed)
+        text << "ON (video captions, no delay)";
     else if (status.running && status.buffering)
         text << "ON (buffering...)";
     else

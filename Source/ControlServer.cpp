@@ -67,6 +67,7 @@ juce::String ControlServer::statusJson() const
     obj->setProperty ("running", status.running);
     obj->setProperty ("enabled", status.enabled);
     obj->setProperty ("buffering", status.buffering);
+    obj->setProperty ("bypassed", status.bypassed);
     obj->setProperty ("delayMs", juce::roundToInt (status.delaySeconds * 1000.0));
 
     return juce::JSON::toString (juce::var (obj), true);
@@ -104,6 +105,20 @@ void ControlServer::handleConnection (juce::StreamingSocket& client)
     }
     else if (method == "GET" && path == "/status")
     {
+        body = statusJson();
+    }
+    else if (method == "GET" && path == "/lexicon")
+    {
+        // The profanity word list, so the browser extension matches the same words
+        juce::Array<juce::var> list;
+        for (auto& w : audioEngine.getProfanityFilter().words())
+            list.add (juce::String (w));
+        body = juce::JSON::toString (juce::var (list), true);
+    }
+    else if (method == "POST" && path == "/bypass")
+    {
+        // Extension is muting a captioned video itself: pass audio through for 3 s
+        audioEngine.setBypassLease (3.0);
         body = statusJson();
     }
     else if (method == "POST" && path == "/debug/dump")

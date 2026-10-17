@@ -534,8 +534,9 @@ AudioEngine::FilterStatus AudioEngine::getFilterStatus() const
     FilterStatus status;
     status.running = isRunning.load();
     status.enabled = filterEnabled.load();
+    status.bypassed = status.enabled && isBypassed();
 
-    if (status.running && status.enabled)
+    if (status.running && status.enabled && !status.bypassed)
     {
         status.buffering = !playbackStarted.load() || outputPaused.load();
         // While buffering, output is silent and will start at the target delay
@@ -739,7 +740,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     transcriptionInterval += numSamples;
     
     // Filter off: don't spend GPU time transcribing audio that plays uncensored
-    if (!filterEnabled.load())
+    if (!filterActive())
     {
         bufferWritePos = 0;
         transcriptionInterval = 0;
@@ -830,7 +831,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     // Filter Explicit Speech toggle: when off, pass input straight through with no
     // delay. The read position tracks the write position so that turning the filter
     // back on starts a fresh initialDelaySeconds fill (heard as a short silence).
-    if (!filterEnabled.load())
+    if (!filterActive())
     {
         for (int i = 0; i < numSamples; ++i)
         {

@@ -40,7 +40,8 @@ and follows along with the song's lyrics.
 | 🔇 | **Live muting** | Audio is held about 3.5 seconds so explicit words are muted before you hear them, using a profanity word list. Mute or Reverse mode. |
 | 🎚️ | **Per-app filtering** | Only the apps you choose (Spotify, Firefox, Chrome, Brave…) go through the filter, and only while it's running. Games, calls and system sounds are untouched. |
 | ⏯️ | **Instant on/off** | The **Filter Explicit Speech** toggle drops to zero delay when off, from the app or the browser. |
-| 📺 | **Video in sync** | A browser extension delays YouTube and Steam store video by exactly the audio delay, so lips match the filtered sound. |
+| ⚡ | **No delay on captioned YouTube** | The browser extension reads a video's own captions (auto-captions time every word and mark swears as `[ __ ]`) and mutes the video at those moments, with no delay at all. |
+| 📺 | **Video in sync** | Videos without captions, and Steam store trailers, use the delayed filter; the extension delays their picture by exactly the audio delay. |
 | 🧠 | **Whisper on your GPU** | Pick a speech model, from *tiny.en* (lightest) to *medium.en* (most accurate). |
 | 📝 | **Lyrics-guided** | Finds the song's lyrics (LRCLIB, Genius, lyrics.ovh) to catch misheard swears and skip false alarms. |
 | 🎤 | **Karaoke lyrics** | Shows each lyric line just before it's sung, with the next line underneath, swears masked. |

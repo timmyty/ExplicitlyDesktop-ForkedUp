@@ -26,6 +26,14 @@ can be switched off instantly with no delay.
 - The app remembers your devices, censor mode, toggle state and model, and starts filtering by
   itself when opened, so routed apps are never left silent.
 
+### No-delay muting for captioned YouTube videos
+- The extension reads the video's captions as YouTube's player receives them (auto-generated
+  captions give every word's time and write swears as `[ __ ]`), builds mute cues
+  (`{eventId, mediaId, timestamp: {startMs, endMs}, action: "MUTE"}`) and mutes the video player
+  at those moments by its playback time. Nothing is downloaded and the audio isn't altered.
+- While it does this, it tells the app (`POST /bypass`, renewed every second) to pass the audio
+  through undelayed. Videos without captions fall back to the delayed filter below.
+
 ### YouTube video kept in sync
 - A small browser extension (`BrowserExtension/`, for Chrome, Brave and Firefox) delays the YouTube
   picture by exactly the app's current audio delay while the filter is on, so lips match the

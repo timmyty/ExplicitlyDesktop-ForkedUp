@@ -1,5 +1,5 @@
 // Talks to Explicitly Desktop's local control port on behalf of the popup and
-// YouTube tabs. Runs in the extension context, so the app can tell it apart
+// YouTube and Steam tabs. Runs in the extension context, so the app can tell it apart
 // from web pages (which it refuses).
 
 const API = "http://127.0.0.1:8766";
@@ -24,6 +24,18 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "toggle") {
     call("POST", "/filter/toggle").then(sendResponse);
+    return true;
+  }
+  if (msg?.type === "bypass") {
+    // A tab is muting a captioned video itself: keep the app's audio undelayed
+    call("POST", "/bypass").then(sendResponse);
+    return true;
+  }
+  if (msg?.type === "lexicon") {
+    fetch(API + "/lexicon", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])
+      .then(sendResponse);
     return true;
   }
   return false;

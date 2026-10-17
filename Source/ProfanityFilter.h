@@ -93,6 +93,9 @@ public:
         
         Complexity: O(1) average case (hash lookup)
     */
+    /** All lexicon entries (lowercase). */
+    const auto& words() const { return lexicon_; }
+    
     bool isProfane(const std::string& word) const
     {
         std::string lower = word;
