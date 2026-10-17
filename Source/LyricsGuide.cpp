@@ -132,6 +132,18 @@ LyricsGuide::Status LyricsGuide::getStatus() const
     return s;
 }
 
+std::string LyricsGuide::getFullLyrics() const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    if (lyrics.empty() || loadedKey != currentKey)
+        return {};
+
+    std::string text;
+    for (auto& line : lyricLines)
+        text += line + "\n";
+    return text;
+}
+
 //==============================================================================
 juce::File LyricsGuide::cacheFileFor (const std::string& songKey) const
 {

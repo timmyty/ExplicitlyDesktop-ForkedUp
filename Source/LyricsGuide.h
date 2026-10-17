@@ -85,6 +85,10 @@ public:
     };
     Status getStatus() const;
 
+    /** The current song's full lyrics, one line per line, profanity masked
+        (empty when there are none). */
+    std::string getFullLyrics() const;
+
     /** Text normalisation shared with the matcher: lowercase ASCII letters/digits. */
     static std::string normalizeWord (const std::string& word);
 

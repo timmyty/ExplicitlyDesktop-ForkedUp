@@ -134,6 +134,11 @@ public:
             lyricsGuide->setManualLyrics(text);
     }
 
+    std::string getFullLyrics() const
+    {
+        return lyricsGuide != nullptr ? lyricsGuide->getFullLyrics() : std::string();
+    }
+
     LyricsGuide::Status getLyricsStatus() const
     {
         return lyricsGuide != nullptr ? lyricsGuide->getStatus() : LyricsGuide::Status();

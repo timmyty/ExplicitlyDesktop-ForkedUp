@@ -104,6 +104,9 @@ private:
     
     juce::TextButton pasteLyricsButton;      // Paste lyrics for the song playing now
     juce::TextButton geniusKeyButton;        // Enter a Genius API key for lyrics lookups
+    juce::TextButton previewLyricsButton;    // Shown when the song's full lyrics were found
+    juce::Component::SafePointer<juce::DialogWindow> lyricsPreviewWindow;
+    void showFullLyrics();
     std::unique_ptr<juce::AlertWindow> geniusKeyWindow;
     void showGeniusKey();
     std::unique_ptr<juce::AlertWindow> pasteLyricsWindow;

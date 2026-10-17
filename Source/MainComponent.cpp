@@ -167,6 +167,10 @@ MainComponent::MainComponent()
     geniusKeyButton.onClick = [this] { showGeniusKey(); };
     addAndMakeVisible (geniusKeyButton);
 
+    previewLyricsButton.setButtonText ("Preview Full Lyrics");
+    previewLyricsButton.onClick = [this] { showFullLyrics(); };
+    addChildComponent (previewLyricsButton);   // Visible once lyrics are found
+
     // Debug Controls
     showRawJsonToggle.setButtonText ("Show Raw JSON");
     addAndMakeVisible (showRawJsonToggle);
@@ -332,6 +336,8 @@ void MainComponent::resized()
     songInfoLabel.setBounds (area.removeFromTop (25));
     auto songRow = area.removeFromTop (50);
     geniusKeyButton.setBounds (songRow.removeFromRight (120).reduced (0, 8));
+    songRow.removeFromRight (6);
+    previewLyricsButton.setBounds (songRow.removeFromRight (150).reduced (0, 8));
     songRow.removeFromRight (6);
     pasteLyricsButton.setBounds (songRow.removeFromRight (110).reduced (0, 8));
     songRow.removeFromRight (10);
@@ -592,9 +598,48 @@ void MainComponent::showPasteLyrics()
     }), false);
 }
 
+void MainComponent::showFullLyrics()
+{
+    auto text = audioEngine->getFullLyrics();
+    if (text.empty())
+        return;
+
+    auto status = audioEngine->getLyricsStatus();
+    juce::String title = "Lyrics - " + juce::String (status.song);
+
+    // Reuse the window if it's open, so it follows song changes
+    if (lyricsPreviewWindow != nullptr)
+    {
+        if (auto* editor = dynamic_cast<juce::TextEditor*> (lyricsPreviewWindow->getContentComponent()))
+            editor->setText (text, false);
+        lyricsPreviewWindow->setName (title);
+        lyricsPreviewWindow->toFront (true);
+        return;
+    }
+
+    auto* editor = new juce::TextEditor();
+    editor->setMultiLine (true, true);
+    editor->setReadOnly (true);
+    editor->setScrollbarsShown (true);
+    editor->setCaretVisible (false);
+    editor->setFont (juce::FontOptions (17.0f));
+    editor->setText (text, false);
+    editor->setSize (520, 640);
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (editor);
+    options.dialogTitle = title;
+    options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    lyricsPreviewWindow = options.launchAsync();
+}
+
 void MainComponent::updateLyricsStatus()
 {
     auto status = audioEngine->getLyricsStatus();
+    previewLyricsButton.setVisible (status.hasLyrics);
     if (status.song.empty())
         return;
     
