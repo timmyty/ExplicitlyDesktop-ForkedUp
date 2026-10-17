@@ -51,7 +51,7 @@ MainComponent::MainComponent()
     
     censorModeCombo.addItem ("Reverse", 1);
     censorModeCombo.addItem ("Mute", 2);
-    censorModeCombo.setSelectedId (1);  // Default: Reverse
+    censorModeCombo.setSelectedId (2);  // Default: Mute
     addAndMakeVisible (censorModeCombo);
     
     // Start/Stop Button
@@ -64,6 +64,16 @@ MainComponent::MainComponent()
             stopProcessing();
     };
     addAndMakeVisible (startStopButton);
+    
+    // Filter Explicit Speech toggle (off = no delay, audio passes straight through)
+    filterToggleButton.setClickingTogglesState (false);
+    filterToggleButton.onClick = [this]
+    {
+        audioEngine->setFilterEnabled (! audioEngine->isFilterEnabled());
+        updateFilterButton();
+        saveSettings();
+    };
+    addAndMakeVisible (filterToggleButton);
     
     // Status
     statusLabel.setText ("Status:", juce::dontSendNotification);
@@ -220,8 +230,15 @@ MainComponent::MainComponent()
         });
     });
     
-    // Populate device lists
+    // Local control port for the browser extension (YouTube video delay sync)
+    controlServer = std::make_unique<ControlServer> (*audioEngine);
+    controlServer->onFilterChanged = [this] { updateFilterButton(); saveSettings(); };
+    controlServer->start();
+    updateFilterButton();
+    
+    // Populate device lists, then restore last session (and auto-start if configured)
     updateDeviceList();
+    restoreSettings();
     
     // Start timer for status updates (every 100ms)
     startTimer (100);
@@ -230,6 +247,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    controlServer.reset();
     if (isProcessing)
         stopProcessing();
 }
@@ -266,7 +284,10 @@ void MainComponent::resized()
     area.removeFromTop (20);
     
     // Start/Stop Button
-    startStopButton.setBounds (area.removeFromTop (50).reduced (150, 0));
+    auto buttonRow = area.removeFromTop (50).reduced (60, 0);
+    startStopButton.setBounds (buttonRow.removeFromLeft (buttonRow.getWidth() / 2 - 10));
+    buttonRow.removeFromLeft (20);
+    filterToggleButton.setBounds (buttonRow);
     area.removeFromTop (30);
     
     // Status
@@ -330,6 +351,7 @@ void MainComponent::timerCallback()
     if (isProcessing)
     {
         updateLatencyDisplay();
+        updateFilterButton();
         
         // Phase 1: Update level meter
         float level = audioEngine->getCurrentInputLevel();
@@ -399,6 +421,8 @@ void MainComponent::startProcessing()
         statusValueLabel.setColour (juce::Label::textColourId, juce::Colours::green);
         logFile.appendText("Updated status color\n");
         
+        saveSettings();
+        
         // Disable device selection during processing
         inputDeviceCombo.setEnabled (false);
         outputDeviceCombo.setEnabled (false);
@@ -443,6 +467,74 @@ void MainComponent::stopProcessing()
     inputDeviceCombo.setEnabled (true);
     outputDeviceCombo.setEnabled (true);
     censorModeCombo.setEnabled (true);
+}
+
+void MainComponent::restoreSettings()
+{
+    juce::PropertiesFile::Options options;
+    options.applicationName = "ExplicitlyDesktop";
+    options.filenameSuffix = ".settings";
+    options.folderName = "ExplicitlyDesktop";
+    options.osxLibrarySubFolder = "Application Support";
+    appProperties.setStorageParameters (options);
+    
+    auto* settings = appProperties.getUserSettings();
+    
+    auto selectByText = [] (juce::ComboBox& combo, const juce::String& text)
+    {
+        for (int i = 0; i < combo.getNumItems(); ++i)
+        {
+            if (combo.getItemText (i) == text)
+            {
+                combo.setSelectedItemIndex (i, juce::dontSendNotification);
+                return true;
+            }
+        }
+        return false;
+    };
+    
+    bool haveInput = selectByText (inputDeviceCombo, settings->getValue ("inputDevice"));
+    bool haveOutput = selectByText (outputDeviceCombo, settings->getValue ("outputDevice"));
+    censorModeCombo.setSelectedId (settings->getIntValue ("censorMode", 2), juce::dontSendNotification);
+    audioEngine->setFilterEnabled (settings->getBoolValue ("filterEnabled", true));
+    updateFilterButton();
+    
+    // Apps routed to VB-CABLE are silent unless we're processing, so start
+    // automatically once devices have been chosen and started successfully before
+    if (haveInput && haveOutput && settings->getBoolValue ("autoStart", false))
+        juce::MessageManager::callAsync ([this] { if (! isProcessing) startProcessing(); });
+}
+
+void MainComponent::saveSettings()
+{
+    auto* settings = appProperties.getUserSettings();
+    if (settings == nullptr)
+        return;
+    
+    settings->setValue ("inputDevice", inputDeviceCombo.getText());
+    settings->setValue ("outputDevice", outputDeviceCombo.getText());
+    settings->setValue ("censorMode", censorModeCombo.getSelectedId());
+    settings->setValue ("filterEnabled", audioEngine->isFilterEnabled());
+    if (isProcessing)
+        settings->setValue ("autoStart", true);
+    settings->saveIfNeeded();
+}
+
+void MainComponent::updateFilterButton()
+{
+    auto status = audioEngine->getFilterStatus();
+    
+    juce::String text = "Filter Explicit Speech: ";
+    if (! status.enabled)
+        text << "OFF (no delay)";
+    else if (status.running && status.buffering)
+        text << "ON (buffering...)";
+    else
+        text << "ON";
+    
+    filterToggleButton.setButtonText (text);
+    filterToggleButton.setColour (juce::TextButton::buttonColourId,
+                                  status.enabled ? juce::Colours::darkgreen : juce::Colours::darkred);
 }
 
 void MainComponent::updateLatencyDisplay()

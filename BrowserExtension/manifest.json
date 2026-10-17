@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Explicitly Video Sync",
+  "version": "1.0.0",
+  "description": "Delays YouTube video to match Explicitly Desktop's filtered audio while Filter Explicit Speech is on.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8766/*",
+    "*://*.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Explicitly: Filter Explicit Speech",
+    "default_popup": "popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "explicitly-video-sync@local",
+      "strict_min_version": "121.0"
+    }
+  }
+}

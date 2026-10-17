@@ -508,6 +508,28 @@ double AudioEngine::getCurrentBufferSize() const
     return (double)gap / sampleRate;
 }
 
+void AudioEngine::setFilterEnabled(bool enabled)
+{
+    filterEnabled.store(enabled);
+    std::cout << "[Filter] Filter Explicit Speech " << (enabled ? "ON" : "OFF") << std::endl;
+}
+
+AudioEngine::FilterStatus AudioEngine::getFilterStatus() const
+{
+    FilterStatus status;
+    status.running = isRunning.load();
+    status.enabled = filterEnabled.load();
+
+    if (status.running && status.enabled)
+    {
+        status.buffering = !playbackStarted.load() || outputPaused.load();
+        // While buffering, output is silent and will start at the target delay
+        status.delaySeconds = status.buffering ? initialDelaySeconds : getCurrentBufferSize();
+    }
+
+    return status;
+}
+
 bool AudioEngine::isBufferUnderrun() const
 {
     return bufferUnderrun.load();
@@ -535,6 +557,7 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     transcriptionInterval = 0;
     streamTime = 0.0;
     playbackStarted = false;  // Track when we start playing
+    outputPaused = false;
     wasWaiting = false;
     debugCounter = 0;
     
@@ -678,8 +701,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     // Send chunks with configurable overlap between them
     transcriptionInterval += numSamples;
     
+    // Filter off: don't spend GPU time transcribing audio that plays uncensored
+    if (!filterEnabled.load())
+    {
+        bufferWritePos = 0;
+        transcriptionInterval = 0;
+    }
     // Send to Whisper if: (1) we have chunkSeconds of audio, AND (2) Whisper is ready for more
-    if (transcriptionInterval >= (sampleRate * chunkSeconds) && !hasNewBuffer.load())
+    else if (transcriptionInterval >= (sampleRate * chunkSeconds) && !hasNewBuffer.load())
     {
         // Phase 5: Signal background thread (it's ready for next chunk)
         {
@@ -760,6 +789,37 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         lastUnderrunWarningTime = streamTime;
     }
     
+    // Filter Explicit Speech toggle: when off, pass input straight through with no
+    // delay. The read position tracks the write position so that turning the filter
+    // back on starts a fresh initialDelaySeconds fill (heard as a short silence).
+    if (!filterEnabled.load())
+    {
+        for (int i = 0; i < numSamples; ++i)
+        {
+            for (int ch = 0; ch < std::min(2, numInputChannels); ++ch)
+                if (inputChannelData[ch] != nullptr)
+                    delayBuffer[ch][delayWritePos] = inputChannelData[ch][i];
+
+            for (int ch = 0; ch < numOutputChannels; ++ch)
+            {
+                if (outputChannelData[ch] == nullptr)
+                    continue;
+                int inCh = std::min(ch, numInputChannels - 1);
+                outputChannelData[ch][i] = (inCh >= 0 && inputChannelData[inCh] != nullptr)
+                                               ? inputChannelData[inCh][i] : 0.0f;
+            }
+
+            delayWritePos = (delayWritePos + 1) % delayBufferSize;
+        }
+
+        delayReadPos = delayWritePos;
+        playbackStarted.store(false);
+        outputPaused.store(false);
+        bufferUnderrun.store(false);
+        streamTime += (double)numSamples / sampleRate;
+        return;
+    }
+
     // Phase 6: Write input to delay buffer, read from 10 seconds ago
     for (int i = 0; i < numSamples; ++i)
     {
@@ -794,8 +854,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         else
         {
             // Dynamic buffering: pause if too low, resume when recovered
-            static bool wasPaused = false;
-            
+            bool wasPaused = outputPaused.load();
+
             double pauseThreshold = initialDelaySeconds - 2.0;  // Pause at initialDelaySeconds - 2s
             double resumeThreshold = initialDelaySeconds;       // Resume at initialDelaySeconds
             
@@ -812,6 +872,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
                          << bufferSeconds << "s - RESUMING playback\n" << std::endl;
             }
             
+            outputPaused.store(wasPaused);
             canPlay = !wasPaused;
         }
         

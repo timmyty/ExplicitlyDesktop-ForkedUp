@@ -16,15 +16,18 @@ endif()
 # Add JUCE to the build
 add_subdirectory(${JUCE_DIR} JUCE EXCLUDE_FROM_ALL)
 
-# Whisper SDK Path (adjust if needed)
-set(WHISPER_SDK_DIR "C:/whisper-sdk" CACHE PATH "Path to Whisper SDK")
+# whisper.cpp source checkout and its build folder (adjust if needed).
+# The app runs Whisper on the CPU (use_gpu = false), so a plain CPU build works:
+#   cmake -B build -A x64 -DBUILD_SHARED_LIBS=ON && cmake --build build --config Release
+set(WHISPER_SDK_DIR "C:/whisper.cpp" CACHE PATH "Path to whisper.cpp checkout")
+set(WHISPER_BUILD_DIR "${WHISPER_SDK_DIR}/build" CACHE PATH "Path to whisper.cpp build folder")
 
 if(NOT EXISTS "${WHISPER_SDK_DIR}/include/whisper.h")
     message(FATAL_ERROR "Whisper SDK not found at ${WHISPER_SDK_DIR}. Please see WHISPER_SETUP.md")
 endif()
 
-# Include directories
-include_directories(${WHISPER_SDK_DIR}/include)
+# Include directories (whisper.h includes ggml headers)
+include_directories(${WHISPER_SDK_DIR}/include ${WHISPER_SDK_DIR}/ggml/include)
 
 # Source files
 set(SOURCES
@@ -38,6 +41,7 @@ set(SOURCES
     Source/QualityAnalyzer.cpp
     Source/SongRecognition.cpp
     Source/WindowsMediaInfo.cpp
+    Source/ControlServer.cpp
 )
 
 # Create executable
@@ -74,50 +78,19 @@ target_link_libraries(ExplicitlyDesktop
 
 # Link Whisper library
 if(WIN32)
-    # Use CUDA-enabled whisper build for GPU acceleration
-    set(WHISPER_CUDA_BUILD "C:/whisper.cpp/build-cuda")
-    
     target_link_libraries(ExplicitlyDesktop PRIVATE
-        ${WHISPER_CUDA_BUILD}/src/Release/whisper.lib
+        ${WHISPER_BUILD_DIR}/src/Release/whisper.lib
         windowsapp.lib  # Windows Runtime for Media Control
+        ws2_32.lib      # Sockets for the local control server
     )
     
-    # Copy CUDA-enabled Whisper DLLs to output directory
+    # Copy whisper/ggml DLLs (CPU, or CUDA if built that way) next to the exe
+    file(GLOB WHISPER_DLLS "${WHISPER_BUILD_DIR}/bin/Release/*.dll")
     add_custom_command(TARGET ExplicitlyDesktop POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${WHISPER_CUDA_BUILD}/bin/Release/whisper.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WHISPER_DLLS}
             $<TARGET_FILE_DIR:ExplicitlyDesktop>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${WHISPER_CUDA_BUILD}/bin/Release/ggml.dll"
-            $<TARGET_FILE_DIR:ExplicitlyDesktop>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${WHISPER_CUDA_BUILD}/bin/Release/ggml-cuda.dll"
-            $<TARGET_FILE_DIR:ExplicitlyDesktop>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${WHISPER_CUDA_BUILD}/bin/Release/ggml-base.dll"
-            $<TARGET_FILE_DIR:ExplicitlyDesktop>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${WHISPER_CUDA_BUILD}/bin/Release/ggml-cpu.dll"
-            $<TARGET_FILE_DIR:ExplicitlyDesktop>
-        COMMENT "Copying CUDA-enabled Whisper DLLs to output directory"
+        COMMENT "Copying Whisper DLLs to output directory"
     )
-    
-    # Copy CUDA runtime DLLs for GPU acceleration
-    set(CUDA_TOOLKIT_ROOT "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6")
-    if(EXISTS "${CUDA_TOOLKIT_ROOT}/bin")
-        add_custom_command(TARGET ExplicitlyDesktop POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CUDA_TOOLKIT_ROOT}/bin/cudart64_12.dll"
-                $<TARGET_FILE_DIR:ExplicitlyDesktop>
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CUDA_TOOLKIT_ROOT}/bin/cublas64_12.dll"
-                $<TARGET_FILE_DIR:ExplicitlyDesktop>
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CUDA_TOOLKIT_ROOT}/bin/cublasLt64_12.dll"
-                $<TARGET_FILE_DIR:ExplicitlyDesktop>
-            COMMENT "Copying CUDA runtime DLLs for GPU support"
-        )
-    endif()
 elseif(APPLE)
     target_link_libraries(ExplicitlyDesktop PRIVATE
         ${WHISPER_SDK_DIR}/lib/libwhisper.dylib
@@ -168,23 +141,16 @@ set_target_properties(ExplicitlyDesktop PROPERTIES
 )
 
 # Phase 3: Standalone Whisper test executable
-add_executable(WhisperTest Source/WhisperTest.cpp)
+add_executable(WhisperTest EXCLUDE_FROM_ALL Source/WhisperTest.cpp)
 
 target_include_directories(WhisperTest PRIVATE
     ${WHISPER_SDK_DIR}/include
+    ${WHISPER_SDK_DIR}/ggml/include
 )
 
 if(WIN32)
     target_link_libraries(WhisperTest PRIVATE
-        ${WHISPER_SDK_DIR}/lib/whisper.lib
-    )
-    
-    # Copy Whisper DLLs to WhisperTest output directory
-    add_custom_command(TARGET WhisperTest POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${WHISPER_SDK_DIR}/lib
-            $<TARGET_FILE_DIR:WhisperTest>
-        COMMENT "Copying Whisper DLLs to WhisperTest directory"
+        ${WHISPER_BUILD_DIR}/src/Release/whisper.lib
     )
 endif()
 

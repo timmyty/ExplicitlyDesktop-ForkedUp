@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 14px system-ui, sans-serif; margin: 0; padding: 14px; width: 240px; background: #1e1e1e; color: #eee; }
+    button { width: 100%; padding: 12px; font-size: 15px; font-weight: 600; border: 0; border-radius: 6px; cursor: pointer; color: #fff; }
+    button.on { background: #1f7a3a; }
+    button.off { background: #8a2525; }
+    button:disabled { background: #555; cursor: default; }
+    p { margin: 10px 0 0; color: #aaa; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <button id="toggle" disabled>Checking…</button>
+  <p id="detail"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

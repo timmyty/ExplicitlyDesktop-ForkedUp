@@ -92,7 +92,31 @@ public:
         @return     true if buffer is critically low
     */
     bool isBufferUnderrun() const;
-    
+
+    /**
+        Filter Explicit Speech toggle. Safe to call from any thread.
+
+        When off, input passes straight to the output with no delay buffer and
+        Whisper is idle. When turned back on, output is silent for
+        initialDelaySeconds while the delay buffer refills.
+    */
+    void setFilterEnabled(bool enabled);
+    bool isFilterEnabled() const { return filterEnabled.load(); }
+
+    struct FilterStatus
+    {
+        bool running = false;
+        bool enabled = false;
+        bool buffering = false;      // Filter on but output silent while the delay refills
+        double delaySeconds = 0.0;   // Delay between input and output (0 when filter is off)
+    };
+
+    /**
+        Snapshot of the toggle and current delay, used by the UI and the
+        local status server that keeps browser video in sync.
+    */
+    FilterStatus getFilterStatus() const;
+
     /**
         Enable/disable testing mode.
         
@@ -254,6 +278,8 @@ private:
     // Playback timing
     double streamTime = 0.0;
     std::atomic<bool> playbackStarted{false};
+    std::atomic<bool> outputPaused{false};    // Output silenced while the delay buffer rebuilds
+    std::atomic<bool> filterEnabled{true};    // Filter Explicit Speech toggle
     std::atomic<bool> wasWaiting{false};
     int debugCounter = 0;
     double bufferCaptureTime = 0.0;

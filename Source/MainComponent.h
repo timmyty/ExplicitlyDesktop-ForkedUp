@@ -21,6 +21,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "AudioEngine.h"
+#include "ControlServer.h"
 
 class MainComponent  : public juce::Component,
                        public juce::Timer
@@ -43,6 +44,9 @@ private:
     void exportDebugLog();
     void updateLiveLyrics(const juce::String& words);
     void updateActualLyrics(const juce::String& words);
+    void updateFilterButton();
+    void restoreSettings();
+    void saveSettings();
     
     // GUI Components - Controls
     juce::Label titleLabel;
@@ -57,6 +61,7 @@ private:
     juce::ComboBox censorModeCombo;
     
     juce::TextButton startStopButton;
+    juce::TextButton filterToggleButton;   // Filter Explicit Speech on/off
     
     juce::Label statusLabel;
     juce::Label statusValueLabel;
@@ -104,6 +109,8 @@ private:
     
     // Audio Engine
     std::unique_ptr<AudioEngine> audioEngine;
+    juce::ApplicationProperties appProperties;     // Remembers devices, mode and toggle
+    std::unique_ptr<ControlServer> controlServer;   // Lets the browser extension sync video delay
     bool isProcessing = false;
     juce::String debugLog;
     juce::String recentLyrics;         // Store recent words for live display (Whisper)
