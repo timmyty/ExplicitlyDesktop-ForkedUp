@@ -1122,7 +1122,7 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         // Measured on medium.en with a test clip of known word positions
         // (EXPLICITLY_DEBUG_RECORD): starts +0.24..+0.33s late; ending words at the
         // next word's start instead clipped the following word in songs.
-        const double startBias = -0.30;
+        const double startBias = -0.25;   // Lets the first consonant through
         const double dtwEndOffset = 0.13;   // Word end after its last token's DTW time
         const int windowSamples = (int)(sampleRate * windowSeconds);
         const int windowStartPos = ((int)captureTime - windowSamples + delayBufferSize) % delayBufferSize;
@@ -1567,10 +1567,10 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 juce::ignoreUnused(chunkEndPos);
                 
                 // Correct Whisper's late word starts (startBias, above) and pad a little
-                // Measured on a real song (sung over loud music) with the rolling
-                // debug recording: starts varied -0.16..+0.18s, ends up to +0.4s
-                double paddingBefore = 0.25;
-                double paddingAfter = 0.20;   // Short enough to keep the next word audible
+                // Keep mutes tight: a leading "f" sound is fine, a muted neighbour
+                // word is not
+                double paddingBefore = 0.0;
+                double paddingAfter = 0.08;
                 
                 // Words the lyrics placed for us are already in real time
                 double bias = hit.finalTimes ? 0.0 : startBias;
@@ -1609,12 +1609,12 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                         int back = (done.pos - actualStartPos + delayBufferSize) % delayBufferSize;
                         int overlap = offset < done.length ? std::min(newLen, done.length - offset)
                                     : (back < newLen ? std::min(done.length, newLen - back) : 0);
-                        if (overlap > newLen / 2)
+                        if (overlap > newLen * 3 / 10)
                             alreadyDone = true;
                     }
-                    // Muting twice is harmless, and a later window may hear a word the
-                    // earlier one cut off, so only Reverse mode skips repeats
-                    if (alreadyDone && currentCensorMode == CensorMode::Reverse)
+                    // The next window often finds the same word with a slightly
+                    // different time; muting both made one word mute for ~2s
+                    if (alreadyDone)
                     {
                         std::cout << "[Phase6] \"" << profanityText << "\" already censored (overlap)" << std::endl;
                         continue;

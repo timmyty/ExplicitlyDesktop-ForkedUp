@@ -727,8 +727,9 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
             d.lyricsSayClean[op.i] = d.aligned && ! lyricProfane (op.j) && ! lyricsCensored
                                      && sim[op.i][op.j] >= 0.5f;
 
+            // On a loose match only trust pairings that sound alike
             bool whisperProfane = profanityFilter.isProfane (w[op.i]);
-            if (lyricProfane (op.j) && ! whisperProfane)
+            if (lyricProfane (op.j) && ! whisperProfane && (d.aligned || sim[op.i][op.j] >= 0.5f))
             {
                 d.extraMutes.push_back ({ whisperWords[op.i].start, whisperWords[op.i].end });
                 d.extraMuteIsFinal.push_back (false);
@@ -740,7 +741,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
             // Whisper heard a word the lyrics don't have here. Could be an ad-lib or
             // a word a clean copy of the lyrics left out, so Whisper still decides
         }
-        else if (lyricProfane (op.j))
+        else if (lyricProfane (op.j) && d.aligned)
         {
             // Lyrics word Whisper missed: it was sung just before the next word Whisper
             // did hear. Whisper's start times run late by startBias, so the next word
