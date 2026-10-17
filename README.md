@@ -1,5 +1,11 @@
 # Explicitly Desktop - Real-Time Profanity Filter
 
+> **This is an expanded fork.** It adds per-app routing, a zero-delay Filter Explicit Speech
+> toggle, YouTube video sync, a Whisper model picker with GPU support, lyrics-guided muting
+> (LRCLIB, Genius, lyrics.ovh) and karaoke-style lyrics. See [FORK_CHANGES.md](FORK_CHANGES.md)
+> for what it does and how it differs, and [SETUP_WINDOWS.md](SETUP_WINDOWS.md) to build and run it.
+
+
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
