@@ -10,7 +10,7 @@ can be switched off instantly with no delay.
 
 ### Live filtering of any app's audio
 - Apps you choose (for example Spotify, Firefox, Chrome and Brave) play into the VB-CABLE virtual
-  audio device. Explicitly Desktop listens to that cable, holds the audio for about 3 seconds while
+  audio device. Explicitly Desktop listens to that cable, holds the audio for about 3.5 seconds while
   it transcribes it, mutes the explicit words, and plays the result on your speakers or headphones.
 - Only the apps you route are delayed. Games, calls and system sounds keep playing normally.
   `Scripts\Route-AppsToFilter.ps1` sets this per-app routing (the same setting as Windows'
@@ -19,7 +19,7 @@ can be switched off instantly with no delay.
 
 ### Filter Explicit Speech toggle
 - One button turns filtering on or off. **Off** passes audio straight through with no added delay.
-  **On** holds about 3 seconds of audio again (heard as a short silence while it refills).
+  **On** holds about 3.5 seconds of audio again (heard as a short silence while it refills).
 - The same toggle is in the browser extension's popup.
 - The app remembers your devices, censor mode, toggle state and model, and starts filtering by
   itself when opened, so routed apps are never left silent.
@@ -101,6 +101,6 @@ Song recognition by audio fingerprint (AcoustID) is only a fallback for when Win
 - Accuracy over loud music depends on Whisper; fast rap and screamed vocals are the hardest.
   Lyrics help a lot when they are found.
 - Firefox only loads the extension temporarily unless it is signed through addons.mozilla.org.
-- About 3 seconds of delay while filtering is inherent to checking words before you hear them.
+- About 3.5 seconds of delay while filtering is inherent to checking words before you hear them.
 
 See [SETUP_WINDOWS.md](SETUP_WINDOWS.md) for setup.

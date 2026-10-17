@@ -258,7 +258,7 @@ private:
     // Configuration variables (easy tuning)
     double chunkSeconds = 2.0;           // Audio chunk size to process (larger chunks = more context)
     double overlapSeconds = 1.0;         // Audio before each chunk also transcribed, to catch boundary words
-    double initialDelaySeconds = 3.0;   // Initial buffering before playback starts
+    double initialDelaySeconds = 3.5;   // Delay while filtering: gives late catches (words found at the start of the next slice) time to land
     int whisperThreads = 8;              // CPU threads for Whisper (set in constructor)
     std::string whisperModelName = "medium.en";
     bool loadWhisperModel();

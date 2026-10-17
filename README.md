@@ -30,7 +30,7 @@ and follows along with the song's lyrics.
 
 | | Feature | Details |
 |---|---|---|
-| 🔇 | **Live muting** | Explicit words are muted about 3 seconds before you'd hear them, using a profanity word list. Mute or Reverse mode. |
+| 🔇 | **Live muting** | Audio is held about 3.5 seconds so explicit words are muted before you hear them, using a profanity word list. Mute or Reverse mode. |
 | 🎚️ | **Per-app filtering** | Only the apps you choose (Spotify, Firefox, Chrome, Brave…) go through the filter. Games, calls and system sounds are untouched. |
 | ⏯️ | **Instant on/off** | The **Filter Explicit Speech** toggle drops to zero delay when off, from the app or the browser. |
 | 📺 | **YouTube in sync** | A browser extension delays the YouTube picture by exactly the audio delay, so lips match the filtered sound. |
@@ -44,7 +44,7 @@ and follows along with the song's lyrics.
 ```
 Spotify / browsers ─► VB-CABLE ─► Explicitly Desktop ─► speakers
                                    │
-                                   ├─ holds ~3 s of audio
+                                   ├─ holds ~3.5 s of audio
                                    ├─ Whisper transcribes 2 s slices
                                    ├─ checks the word list + lyrics
                                    └─ mutes each swear before it plays
@@ -108,7 +108,7 @@ Full instructions: [SETUP_WINDOWS.md](SETUP_WINDOWS.md)
 | small.en | ▅ medium | ★★★☆ | GPU |
 | medium.en | ▇ heaviest | ★★★★ | GPU *(default)* |
 
-Each 2-second slice has to be transcribed within about a second, so only *base.en* and *tiny.en* keep up
+Each 2-second slice has to be transcribed within about 1.5 seconds, so only *base.en* and *tiny.en* keep up
 without a GPU.
 
 ### Where things are kept

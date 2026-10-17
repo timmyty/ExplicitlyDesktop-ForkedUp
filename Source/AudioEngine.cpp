@@ -137,7 +137,7 @@ AudioEngine::AudioEngine()
 
 const std::vector<AudioEngine::ModelChoice>& AudioEngine::availableModels()
 {
-    // Each 2s slice must be transcribed within the ~1s left of the 3s delay.
+    // Each 2s slice must be transcribed within the ~1.5s left of the 3.5s delay.
     // Measured here: on the CPU only base.en keeps up; on an RTX 4090 all do
     static const std::vector<ModelChoice> models = {
         { "tiny.en",   "tiny.en - lightest load, least accurate (75 MB)" },
