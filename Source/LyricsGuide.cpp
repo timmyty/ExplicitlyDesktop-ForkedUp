@@ -128,6 +128,7 @@ LyricsGuide::Status LyricsGuide::getStatus() const
     s.searching = searching;
     s.hasLyrics = ! lyrics.empty() && loadedKey == currentKey;
     s.following = following && s.hasLyrics;
+    s.geniusKeyRejected = geniusKeyRejected;
     return s;
 }
 
@@ -414,6 +415,7 @@ void LyricsGuide::setGeniusToken (const std::string& token)
     auto file = geniusTokenFile();
     file.getParentDirectory().createDirectory();
     file.replaceWithText (juce::String (token).trim());
+    geniusKeyRejected = false;
 
     // Songs that found nothing may be found now
     std::lock_guard<std::mutex> lock (mutex);
@@ -489,10 +491,14 @@ std::string LyricsGuide::fetchFromGenius (const Candidate& c, const std::string&
     auto* hits = json["response"]["hits"].getArray();
     if (hits == nullptr)
     {
-        std::cout << "[LyricsGuide] Genius search failed (check the Genius key)" << std::endl;
+        // 401 {"error":"invalid_token"}: wrong or revoked key
+        bool rejected = json["error"].toString() == "invalid_token";
+        geniusKeyRejected = rejected;
+        std::cout << "[LyricsGuide] Genius search failed" << (rejected ? ": key rejected" : "") << std::endl;
         return {};
     }
 
+    geniusKeyRejected = false;
     auto wantArtist = normalizeWord (c.artist);
     auto wantTitle = normalizeWord (c.title);
     juce::String pageUrl;

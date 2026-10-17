@@ -28,6 +28,7 @@
 #include "LyricsAlignment.h"
 #include "ProfanityFilter.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <map>
@@ -80,6 +81,7 @@ public:
         bool searching = false;
         bool hasLyrics = false;
         bool following = false; // Last chunk aligned to the lyrics
+        bool geniusKeyRejected = false;
     };
     Status getStatus() const;
 
@@ -124,6 +126,8 @@ private:
     std::map<std::string, double> notFound; // Song -> when to look it up again (ms counter)
 
     // Background lookup
+    mutable std::atomic<bool> geniusKeyRejected { false };
+
     std::thread worker;
     std::condition_variable wake;
     bool stopWorker = false;

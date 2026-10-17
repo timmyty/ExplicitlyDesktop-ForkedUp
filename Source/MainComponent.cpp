@@ -604,7 +604,7 @@ void MainComponent::updateLyricsStatus()
     if (status.searching)
         text << "looking up...";
     else if (! status.hasLyrics)
-        text << "none found (Whisper only)";
+        text << "none found (Whisper only)" << (status.geniusKeyRejected ? "  -  Genius rejected the key" : "");
     else if (status.following)
     {
         text << "following (" << juce::String (status.source) << ")";
