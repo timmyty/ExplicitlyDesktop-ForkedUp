@@ -164,7 +164,9 @@ private:
     
     // Audio Engine
     std::unique_ptr<AudioEngine> audioEngine;
-    bool outputOverridden = false;   // EXPLICITLY_OUTPUT_DEVICE (testing): don't save it
+    bool outputOverridden = false;
+    bool snapshotTaken = false;     // EXPLICITLY_SNAPSHOT (docs)
+    int snapshotCountdown = 0;   // EXPLICITLY_OUTPUT_DEVICE (testing): don't save it
     juce::ApplicationProperties appProperties;     // Remembers devices, mode and toggle
     std::unique_ptr<ControlServer> controlServer;   // Lets the browser extension sync video delay
     bool isProcessing = false;

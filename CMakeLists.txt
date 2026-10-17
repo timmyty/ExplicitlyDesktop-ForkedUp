@@ -58,7 +58,8 @@ juce_add_gui_app(ExplicitlyDesktop
     PRODUCT_NAME "Explicitly Desktop"
     COMPANY_NAME "Explicitly Audio Systems"
     BUNDLE_ID "com.explicitly.desktop"
-    ICON_BIG ""
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon-256.png"
 )
 
 # Add source files

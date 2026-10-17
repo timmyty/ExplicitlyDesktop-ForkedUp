@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🎧 Explicitly Desktop
+<img src="Resources/icon-256.png" alt="Explicitly Desktop icon" width="128">
+
+# Explicitly Desktop
 
 **Real-time profanity filter for the music you already play on Windows.**
 
@@ -23,6 +25,11 @@ and follows along with the song's lyrics.
 > [!NOTE]
 > This is an expanded fork of [AndrewMahran7/ExplicitlyDesktop](https://github.com/AndrewMahran7/ExplicitlyDesktop).
 > [FORK_CHANGES.md](FORK_CHANGES.md) describes everything it adds and how it differs from the original.
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Explicitly Desktop following a song: the current lyric line is highlighted with swears masked, the detected song shows its lyrics source, and the Filter Explicit Speech toggle is on" width="720">
+  <br><sub>Following an example song: karaoke lyrics with swears masked, the detected song and its lyrics source.</sub>
+</p>
 
 ---
 

@@ -1,4 +1,4 @@
-/*
+﻿/*
   ==============================================================================
 
     MainComponent.cpp
@@ -21,7 +21,7 @@
 
 MainComponent::MainComponent()
 {
-    setSize (900, 780);
+    setSize (900, 920);
     
     // Title
     titleLabel.setText ("Explicitly Desktop - Real-Time Filter", juce::dontSendNotification);
@@ -383,6 +383,22 @@ void MainComponent::resized()
 
 void MainComponent::timerCallback()
 {
+    // EXPLICITLY_SNAPSHOT=<file.png>: save a picture of the window once karaoke
+    // lyrics are showing (for documentation)
+    if (auto* snapshotPath = std::getenv ("EXPLICITLY_SNAPSHOT"))
+    {
+        if (! snapshotTaken && actualLyricsDisplay.getText().containsChar ((juce::juce_wchar) 10)
+            && liveLyricsDisplay.getText().isNotEmpty() && ++snapshotCountdown > 120)
+        {
+            snapshotTaken = true;
+            juce::File file (snapshotPath);
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            juce::PNGImageFormat().writeImageToStream (createComponentSnapshot (getLocalBounds(), true, 1.0f), stream);
+            std::cout << "[Snapshot] Saved " << file.getFullPathName() << std::endl;
+        }
+    }
+    
     if (isProcessing)
     {
         updateLatencyDisplay();
@@ -766,9 +782,12 @@ void MainComponent::updateLatencyDisplay()
             latencyValueLabel.setText (juce::String (bufferSize, 2) + " s buffer", juce::dontSendNotification);
             
             // Color code: green 14-17s (healthy), yellow 12-14s or 17-19s (borderline), red <12s or >19s (critical)
-            if (bufferSize >= 14.0 && bufferSize <= 17.0)
+            // Green at the normal delay; yellow when getting close to the point
+            // where words can't be muted in time (the old 14-17 s range was
+            // from an earlier design and always showed red)
+            if (bufferSize >= 3.0)
                 latencyValueLabel.setColour (juce::Label::textColourId, juce::Colours::green);
-            else if (bufferSize >= 12.0 && bufferSize < 19.0)
+            else if (bufferSize >= 2.5)
                 latencyValueLabel.setColour (juce::Label::textColourId, juce::Colours::yellow);
             else
                 latencyValueLabel.setColour (juce::Label::textColourId, juce::Colours::red);
