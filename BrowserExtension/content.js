@@ -1,6 +1,7 @@
 // While Explicitly Desktop's Filter Explicit Speech is on, its audio reaches you
-// a few seconds late. This draws the YouTube picture on a canvas over the real
-// video, delayed by exactly the app's current audio delay, so they stay in sync.
+// a few seconds late. This draws the video's picture (YouTube, Steam store
+// trailers) on a canvas over the real video, delayed by exactly the app's
+// current audio delay, so they stay in sync.
 // Pausing and seeking stay in sync too: both the audio and this picture keep
 // playing out what was already buffered, then follow.
 
@@ -19,10 +20,23 @@
   let shown = null;
 
   const active = () => status.running && status.enabled && !status.offline;
+  const isYouTube = location.hostname.endsWith("youtube.com");
 
   function findVideo() {
-    return document.querySelector("#movie_player video.html5-main-video")
-        || document.querySelector("video");
+    if (isYouTube)
+      return document.querySelector("#movie_player video.html5-main-video") || document.querySelector("video");
+
+    // Other sites (Steam store trailers): the biggest visible video, preferring
+    // one that is playing
+    let best = null, bestScore = 0;
+    for (const v of document.querySelectorAll("video")) {
+      const r = v.getBoundingClientRect();
+      const area = Math.max(0, r.width) * Math.max(0, r.height);
+      if (area < 100 * 60) continue;
+      const score = area * (v.paused ? 1 : 10);
+      if (score > bestScore) { best = v; bestScore = score; }
+    }
+    return best;
   }
 
   function clearFrames() {
@@ -32,13 +46,19 @@
   }
 
   function ensureCanvas() {
-    if (canvas && canvas.isConnected && video && canvas.previousSibling === video) return;
+    if (canvas && canvas.isConnected && video && (!isYouTube || canvas.previousSibling === video)) return;
     removeCanvas();
     canvas = document.createElement("canvas");
     canvas.id = "explicitly-delayed-video";
-    // Sit right above the <video> but below YouTube's captions and controls
-    canvas.style.cssText = "position:absolute;pointer-events:none;background:#000;";
-    video.after(canvas);
+    if (isYouTube) {
+      // Sit right above the <video> but below YouTube's captions and controls
+      canvas.style.cssText = "position:absolute;pointer-events:none;background:#000;";
+      video.after(canvas);
+    } else {
+      // Elsewhere, float over the video's on-screen box; clicks pass through
+      canvas.style.cssText = "position:fixed;pointer-events:none;background:#000;z-index:2147483646;";
+      document.documentElement.appendChild(canvas);
+    }
     ctx = canvas.getContext("2d");
   }
 
@@ -49,11 +69,21 @@
   }
 
   function placeCanvas() {
-    // Match the video element's on-screen box (YouTube sets it inline)
-    canvas.style.left = video.style.left || video.offsetLeft + "px";
-    canvas.style.top = video.style.top || video.offsetTop + "px";
-    canvas.style.width = video.clientWidth + "px";
-    canvas.style.height = video.clientHeight + "px";
+    if (isYouTube) {
+      // Match the video element's box (YouTube sets it inline)
+      canvas.style.left = video.style.left || video.offsetLeft + "px";
+      canvas.style.top = video.style.top || video.offsetTop + "px";
+      canvas.style.width = video.clientWidth + "px";
+      canvas.style.height = video.clientHeight + "px";
+      return;
+    }
+    const r = video.getBoundingClientRect();
+    const hidden = r.width < 1 || r.height < 1 || document.fullscreenElement && !document.fullscreenElement.contains(video);
+    canvas.style.display = hidden ? "none" : "block";
+    canvas.style.left = r.left + "px";
+    canvas.style.top = r.top + "px";
+    canvas.style.width = r.width + "px";
+    canvas.style.height = r.height + "px";
   }
 
   function captureSize() {
@@ -71,8 +101,18 @@
       frames.push({ t: performance.now(), bmp });
       if (frames.length > MAX_FRAMES) frames.shift().bmp.close?.();
     } catch {
-      // Protected (DRM) video can't be copied; leave the real video visible
-      removeCanvas();
+      // A video from another site (Steam's CDN) can't be copied unless it was
+      // loaded with CORS. Its CDN allows that, so reload it that way once,
+      // keeping the position; otherwise (DRM) leave the real video visible
+      if (!video.crossOrigin && video.currentSrc && !video.currentSrc.startsWith("blob:")) {
+        const t = video.currentTime, playing = !video.paused;
+        video.crossOrigin = "anonymous";
+        video.load();
+        video.currentTime = t;
+        if (playing) video.play().catch(() => {});
+      } else {
+        removeCanvas();
+      }
     }
   }
 

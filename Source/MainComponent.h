@@ -22,6 +22,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "AudioEngine.h"
 #include "ControlServer.h"
+#include "AppRouter.h"
 
 /** "Actual Lyrics" panel. Plain text draws like a Label; four newline-separated
     lines (previous, current, next, after next) draw karaoke style with the
@@ -165,6 +166,8 @@ private:
     // Audio Engine
     std::unique_ptr<AudioEngine> audioEngine;
     bool outputOverridden = false;
+    AppRouter appRouter;            // Apps to VB-CABLE while processing, back on Stop/exit
+    int routerTicks = 0;
     bool snapshotTaken = false;     // EXPLICITLY_SNAPSHOT (docs)
     int snapshotCountdown = 0;   // EXPLICITLY_OUTPUT_DEVICE (testing): don't save it
     juce::ApplicationProperties appProperties;     // Remembers devices, mode and toggle

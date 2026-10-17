@@ -51,6 +51,7 @@ set(SOURCES
     Source/WindowsMediaInfo.cpp
     Source/ControlServer.cpp
     Source/LyricsGuide.cpp
+    Source/AppRouter.cpp
 )
 
 # Create executable

@@ -38,9 +38,9 @@ and follows along with the song's lyrics.
 | | Feature | Details |
 |---|---|---|
 | 🔇 | **Live muting** | Audio is held about 3.5 seconds so explicit words are muted before you hear them, using a profanity word list. Mute or Reverse mode. |
-| 🎚️ | **Per-app filtering** | Only the apps you choose (Spotify, Firefox, Chrome, Brave…) go through the filter. Games, calls and system sounds are untouched. |
+| 🎚️ | **Per-app filtering** | Only the apps you choose (Spotify, Firefox, Chrome, Brave…) go through the filter, and only while it's running. Games, calls and system sounds are untouched. |
 | ⏯️ | **Instant on/off** | The **Filter Explicit Speech** toggle drops to zero delay when off, from the app or the browser. |
-| 📺 | **YouTube in sync** | A browser extension delays the YouTube picture by exactly the audio delay, so lips match the filtered sound. |
+| 📺 | **Video in sync** | A browser extension delays YouTube and Steam store video by exactly the audio delay, so lips match the filtered sound. |
 | 🧠 | **Whisper on your GPU** | Pick a speech model, from *tiny.en* (lightest) to *medium.en* (most accurate). |
 | 📝 | **Lyrics-guided** | Finds the song's lyrics (LRCLIB, Genius, lyrics.ovh) to catch misheard swears and skip false alarms. |
 | 🎤 | **Karaoke lyrics** | Shows each lyric line just before it's sung, with the next line underneath, swears masked. |
@@ -98,11 +98,10 @@ Full instructions: [SETUP_WINDOWS.md](SETUP_WINDOWS.md)
 1. **Start the app** (`build\bin\Release\Explicitly Desktop.exe`). Pick **CABLE Output** as input, your
    speakers or headphones as output, and a Whisper model, then press **Start Processing**. Next time it
    starts on its own.
-2. **Route your apps** to the filter. Play something in each, then run:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File Scripts\Route-AppsToFilter.ps1      # -Restore to undo
-   ```
-3. **Load the browser extension** for YouTube sync: open `chrome://extensions` (or `brave://extensions`),
+2. **Your apps are routed for you.** While processing, Spotify, Firefox, Chrome and Brave play through the
+   filter. **Stop Processing** or closing the app sends them back to your normal output, so they work
+   without it.
+3. **Load the browser extension** for YouTube and Steam store video sync: open `chrome://extensions` (or `brave://extensions`),
    turn on Developer mode, choose **Load unpacked**, and select the `BrowserExtension` folder.
 4. *(Optional)* Click **Genius key** and paste a Genius API client access token for more lyrics.
 
@@ -131,9 +130,10 @@ without a GPU.
 <details>
 <summary><b>No sound from Spotify or the browser</b></summary>
 
-Routed apps play into VB-CABLE, so they're silent while Explicitly Desktop is closed. Start the app, or run
-`Scripts\Route-AppsToFilter.ps1 -Restore`. If "CABLE Input" or "CABLE Output" is missing, check it isn't
-disabled in Windows Sound settings.
+Stop Processing and closing the app send your apps back to the normal output. An app that wasn't running at
+that moment stays on the cable until it runs while Explicitly Desktop is open (even stopped), which fixes it
+within a few seconds; `Scripts\Route-AppsToFilter.ps1 -Restore` also works. If "CABLE Input" or
+"CABLE Output" is missing, check it isn't disabled in Windows Sound settings.
 </details>
 
 <details>

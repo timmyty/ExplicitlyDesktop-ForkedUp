@@ -31,15 +31,13 @@ The app is `build\bin\Release\Explicitly Desktop.exe`.
 1. In the app pick **Input Device** "CABLE Output (VB-Audio Virtual Cable)", your speakers or
    headphones as **Output Device**, a **Whisper Model**, and press **Start Processing**. These
    are remembered, and the app starts filtering by itself next time.
-2. Route the apps to filter: open them, play something in each, then run
-
-       powershell -ExecutionPolicy Bypass -File Scripts\Route-AppsToFilter.ps1
-
-   (Spotify, Firefox, Chrome and Brave by default; `-Apps name,...` for others, `-Restore` to undo.)
-   Routed apps are silent while the app is closed.
+2. The app routes Spotify, Firefox, Chrome and Brave through the filter while processing, and back
+   to your normal output on Stop Processing or when it closes. Other programs: add their exe names
+   to `routedApps` in the settings file. `Scripts\Route-AppsToFilter.ps1` (and `-Restore`) does the
+   same by hand.
 3. Optional: **Genius key** for more lyrics (a client access token from genius.com/api-clients).
 
-## Browser extension (YouTube video sync)
+## Browser extension (YouTube and Steam store video sync)
 - **Chrome / Brave:** `chrome://extensions` (or `brave://extensions`), turn on Developer mode,
   Load unpacked, choose the `BrowserExtension` folder.
 - **Firefox:** `about:debugging#/runtime/this-firefox`, Load Temporary Add-on, choose

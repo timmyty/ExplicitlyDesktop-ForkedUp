@@ -12,9 +12,11 @@ can be switched off instantly with no delay.
 - Apps you choose (for example Spotify, Firefox, Chrome and Brave) play into the VB-CABLE virtual
   audio device. Explicitly Desktop listens to that cable, holds the audio for about 3.5 seconds while
   it transcribes it, mutes the explicit words, and plays the result on your speakers or headphones.
-- Only the apps you route are delayed. Games, calls and system sounds keep playing normally.
-  `Scripts\Route-AppsToFilter.ps1` sets this per-app routing (the same setting as Windows'
-  Volume mixer), and `-Restore` puts the apps back.
+- Only the apps you route are delayed, and only while the filter is processing. The app sets
+  Windows' per-app output itself: **Start Processing** sends the apps to the cable, **Stop
+  Processing** or closing the app sends them back, so they play normally without it.
+  Games, calls and system sounds keep playing normally. `Scripts\Route-AppsToFilter.ps1` does
+  the same by hand.
 - The censor mode is Mute by default (Reverse is still available).
 
 ### Filter Explicit Speech toggle

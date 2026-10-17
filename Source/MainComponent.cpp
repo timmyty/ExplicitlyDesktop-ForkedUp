@@ -383,6 +383,14 @@ void MainComponent::resized()
 
 void MainComponent::timerCallback()
 {
+    // Every few seconds, route any newly started app the same way: through the
+    // filter while processing, otherwise to the normal output
+    if (++routerTicks >= 30)
+    {
+        routerTicks = 0;
+        appRouter.update (isProcessing);
+    }
+    
     // EXPLICITLY_SNAPSHOT=<file.png>: save a picture of the window once karaoke
     // lyrics are showing (for documentation)
     if (auto* snapshotPath = std::getenv ("EXPLICITLY_SNAPSHOT"))
@@ -469,6 +477,7 @@ void MainComponent::startProcessing()
         startStopButton.setButtonText ("Stop Processing");
         logFile.appendText("Updated button text\n");
         statusValueLabel.setText ("Processing", juce::dontSendNotification);
+        appRouter.update (true);   // Send the apps through the filter
         logFile.appendText("Updated status text\n");
         statusValueLabel.setColour (juce::Label::textColourId, juce::Colours::green);
         logFile.appendText("Updated status color\n");
@@ -497,6 +506,9 @@ void MainComponent::startProcessing()
 void MainComponent::stopProcessing()
 {
     audioEngine->stop();
+    
+    // Give the apps their normal output back, so they play without the filter
+    appRouter.restoreAll();
     
     isProcessing = false;
     startStopButton.setButtonText ("Start Processing");
@@ -556,6 +568,10 @@ void MainComponent::restoreSettings()
     }
     censorModeCombo.setSelectedId (settings->getIntValue ("censorMode", 2), juce::dontSendNotification);
     audioEngine->setFilterEnabled (settings->getBoolValue ("filterEnabled", true));
+    
+    // Apps sent through the filter (exe names)
+    appRouter.setApps (juce::StringArray::fromTokens (
+        settings->getValue ("routedApps", "Spotify.exe,firefox.exe,chrome.exe,brave.exe"), ",", ""));
 
     // Whisper model (EXPLICITLY_WHISPER_MODEL, if set, wins for testing)
     if (std::getenv ("EXPLICITLY_WHISPER_MODEL") == nullptr)
@@ -588,6 +604,7 @@ void MainComponent::saveSettings()
         settings->setValue ("outputDevice", outputDeviceCombo.getText());
     settings->setValue ("censorMode", censorModeCombo.getSelectedId());
     settings->setValue ("filterEnabled", audioEngine->isFilterEnabled());
+    settings->setValue ("routedApps", appRouter.getApps().joinIntoString (","));
     settings->setValue ("whisperModel", juce::String (audioEngine->getWhisperModel()));
     if (isProcessing)
         settings->setValue ("autoStart", true);
