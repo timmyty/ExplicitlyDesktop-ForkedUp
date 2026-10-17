@@ -96,6 +96,7 @@ void LyricsGuide::setSong (const std::string& artist, const std::string& title)
         currentSong = artist.empty() ? title : artist + " - " + title;
         following = false;
         lastPosition = -1;
+        chunksSinceAligned = 1000;
 
         if (loadedKey != key)
         {
@@ -616,6 +617,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
     {
         if (! whisperWords.empty())
             following = false;
+        ++chunksSinceAligned;
         return d;
     }
 
@@ -637,6 +639,17 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
     int bi = 0, bj = 0;
     int expected = lastPosition >= 0 ? lastPosition + n : -1;
 
+    // Songs repeat phrases, so a match far from where the song recently was is
+    // penalised: it has to be clearly better to win (a real skip or seek still
+    // does). Only while the last solid match is recent
+    bool nearRecent = expected >= 0 && chunksSinceAligned <= 4;
+    auto adjusted = [&] (float h, int j)
+    {
+        if (! nearRecent)
+            return h;
+        return h - 0.15f * (float) std::max (0, std::abs (j - expected) - 12);
+    };
+
     for (int i = 1; i <= n; ++i)
     {
         for (int j = 1; j <= m; ++j)
@@ -646,11 +659,14 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
             float h = std::max ({ 0.0f, diag, H[i - 1][j] - gapPenalty, H[i][j - 1] - gapPenalty });
             H[i][j] = h;
 
-            // Repeated choruses tie: prefer the copy nearest where we expect to be
-            bool better = h > best + 1e-4f
-                       || (std::abs (h - best) <= 1e-4f && expected >= 0
-                           && std::abs (j - expected) < std::abs (bj - expected));
-            if (better) { best = h; bi = i; bj = j; }
+            // Best end point by adjusted score; ties go to the copy nearest
+            // where we expect to be
+            float a = adjusted (h, j);
+            bool better = h > 0.0f
+                       && (a > best + 1e-4f
+                           || (std::abs (a - best) <= 1e-4f && expected >= 0
+                               && std::abs (j - expected) < std::abs (bj - expected)));
+            if (better) { best = a; bi = i; bj = j; }
         }
     }
 
@@ -680,6 +696,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
                       && matched >= 2 && matched == spanWhisper;
     d.aligned = strong || continuing;
     following = d.aligned;
+    chunksSinceAligned = d.aligned ? 0 : chunksSinceAligned + 1;
 
     // A looser match is still used to mute profane lyrics Whisper missed (fast
     // rap or screaming rarely matches well); a wrong extra mute costs less than a

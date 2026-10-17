@@ -760,6 +760,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
             // This marks where the END of the chunk is in the delay buffer
             // The chunk starts chunkSeconds before this position
             bufferCaptureTime = (double)delayWritePos;  // Store END position of chunk
+            bufferCaptureSamples = samplesCaptured.load();
             
             int chunkStartPos = (delayWritePos - (int)(sampleRate * chunkSeconds) + delayBufferSize) % delayBufferSize;
             std::cout << "[CAPTURE] Sending chunk to Whisper | chunkStart=" << chunkStartPos 
@@ -850,6 +851,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         }
 
         delayReadPos = delayWritePos;
+        samplesCaptured += numSamples;
         playbackStarted.store(false);
         outputPaused.store(false);
         bufferUnderrun.store(false);
@@ -951,6 +953,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     
     // Update stream time (tracks the DELAYED output time)
     streamTime += (double)numSamples / sampleRate;
+    samplesCaptured += numSamples;
     
     if (currentCount == 0)
         std::cout << "[Phase6] Audio passthrough + censorship active" << std::endl;
@@ -982,6 +985,7 @@ void AudioEngine::whisperThreadFunction()
             // Copy to local buffer BEFORE releasing lock
             std::copy(processingBuffer.begin(), processingBuffer.end(), localBuffer.begin());
             double captureTime = bufferCaptureTime;  // Copy timestamp
+            captureStreamSeconds = (double) bufferCaptureSamples / sampleRate;
             hasNewBuffer.store(false);
             
             // NOW release the lock - audio callback can write new data safely
@@ -1508,21 +1512,25 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
             }
             
             // "Actual Lyrics", karaoke style: each lyric line appears a moment before
-            // it is sung, with the next line underneath. Overlapping windows repeat
-            // lines, so each line is cued once (unless the song jumps back, e.g. a
-            // repeated section, or a new song starts)
+            // it is sung, with the previous line above and the next two below
             const double karaokeLeadSeconds = 0.6;
             if (guide.songGeneration != lastCueGeneration)
             {
                 lastCueGeneration = guide.songGeneration;
                 lastCuedLine = -1;
+                lastCueTime = -1.0;
             }
+            const double windowStreamStart = captureStreamSeconds - windowSeconds;
             
             for (const auto& cue : guide.lineCues)
             {
-                if (cue.line <= lastCuedLine && cue.line > lastCuedLine - 4)
+                // In order of when they are heard: the overlap's repeats are
+                // dropped, but a corrected match (even to an earlier line) shows
+                double cueTime = windowStreamStart + cue.start;
+                if (cue.line == lastCuedLine || cueTime < lastCueTime + 0.5)
                     continue;
                 lastCuedLine = cue.line;
+                lastCueTime = cueTime;
                 
                 // Four lines: previous, current, next, the one after (the panel
                 // highlights the second)

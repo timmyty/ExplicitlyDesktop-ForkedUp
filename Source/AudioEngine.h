@@ -281,7 +281,10 @@ private:
     struct CensorRecord { int pos; int length; std::chrono::steady_clock::time_point when; };
     std::vector<CensorRecord> recentCensors;   // Stretches censored recently (windows overlap)
     int lastCuedLine = -1;          // Karaoke: last lyric line scheduled for display
+    double lastCueTime = -1.0;      // ...and when in the stream it starts (seconds)
     int lastCueGeneration = -1;
+    std::atomic<long long> samplesCaptured{0};   // Input samples since start (stream clock)
+    long long bufferCaptureSamples = 0;          // samplesCaptured when the chunk was sent
     std::shared_ptr<bool> uiAlive = std::make_shared<bool>(true);  // Guards delayed UI updates
     double lastMediaPollTime = 0.0;
     
@@ -339,6 +342,7 @@ private:
     std::atomic<bool> wasWaiting{false};
     int debugCounter = 0;
     double bufferCaptureTime = 0.0;
+    double captureStreamSeconds = 0.0;   // Stream time at the end of the chunk being transcribed
     
     // Buffer underrun handling
     std::atomic<bool> bufferUnderrun{false};

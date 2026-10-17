@@ -131,6 +131,7 @@ private:
     bool searching = false;
     bool following = false;
     int lastPosition = -1;
+    int chunksSinceAligned = 1000;         // Chunks since the last solid match
     int songGeneration = 0;
     std::map<std::string, double> notFound; // Song -> when to look it up again (ms counter)
 
