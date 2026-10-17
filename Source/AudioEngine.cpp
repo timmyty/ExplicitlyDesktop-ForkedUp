@@ -206,6 +206,10 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
         stop();
     }
     
+    // A hold or flush left over from an earlier run doesn't apply to this one
+    held.store(false);
+    flushRequested.store(false);
+    
     // Store censor mode
     currentCensorMode = mode;
     std::cout << "[Phase6] Censor mode: " << (mode == CensorMode::Mute ? "MUTE" : "REVERSE") << std::endl;
@@ -543,6 +547,10 @@ AudioEngine::FilterStatus AudioEngine::getFilterStatus() const
         status.delaySeconds = status.buffering ? initialDelaySeconds : getCurrentBufferSize();
     }
 
+    status.held = held.load();
+    status.localMuted = localOutputMuted.load();
+    status.sampleRate = status.running ? sampleRate : 0;
+
     return status;
 }
 
@@ -642,6 +650,32 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         }
         float rms = std::sqrt(rmsSum / numSamples);
         currentInputLevel.store(rms);
+    }
+    
+    // Phone streaming: a flush (after a seek) drops the audio waiting in the delay
+    // buffer, so playback refills from what comes in now (initialDelaySeconds of
+    // silence). The ASR chunk in progress is dropped with it.
+    if (flushRequested.load(std::memory_order_relaxed) && flushRequested.exchange(false))
+    {
+        delayReadPos = delayWritePos;
+        playbackStarted.store(false);
+        outputPaused.store(false);
+        bufferUnderrun.store(false);
+        bufferWritePos = 0;
+        transcriptionInterval = 0;
+    }
+    
+    // Phone streaming: hold (pause) freezes the delay pipeline while filtering. Nothing
+    // is written, read or transcribed and the stream clock stops, so resuming carries
+    // on with no gap and no replay. The output is silent meanwhile.
+    if (held.load(std::memory_order_relaxed) && filterActive())
+    {
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData[ch] != nullptr)
+                std::fill(outputChannelData[ch], outputChannelData[ch] + numSamples, 0.0f);
+        
+        finishOutput(outputChannelData, numOutputChannels, numSamples, true, true, currentDelaySamples());
+        return;
     }
     
     // Phase 5: Accumulate audio into buffer (mono downmix)
@@ -857,6 +891,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         outputPaused.store(false);
         bufferUnderrun.store(false);
         streamTime += (double)numSamples / sampleRate;
+        finishOutput(outputChannelData, numOutputChannels, numSamples, false, false, 0);
         return;
     }
 
@@ -956,8 +991,46 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     streamTime += (double)numSamples / sampleRate;
     samplesCaptured += numSamples;
     
+    finishOutput(outputChannelData, numOutputChannels, numSamples, true, false, currentDelaySamples());
+    
     if (currentCount == 0)
         std::cout << "[Phase6] Audio passthrough + censorship active" << std::endl;
+}
+
+uint32_t AudioEngine::currentDelaySamples() const noexcept
+{
+    if (delayBufferSize <= 0)
+        return 0;
+    
+    // While buffering the output is silent and starts at the target delay (as getFilterStatus)
+    if (!playbackStarted.load(std::memory_order_relaxed) || outputPaused.load(std::memory_order_relaxed))
+        return (uint32_t)(initialDelaySeconds * sampleRate);
+    
+    return (uint32_t)((delayWritePos - delayReadPos + delayBufferSize) % delayBufferSize);
+}
+
+void AudioEngine::finishOutput(float* const* outputChannelData, int numOutputChannels, int numSamples,
+                               bool filterOn, bool holding, uint32_t delaySamples) noexcept
+{
+    // Audio thread: no locks, allocation or logging here. With no phone client
+    // the tap is a single atomic check.
+    if (auto* tap = pcmTap.load(std::memory_order_acquire))
+    {
+        if (tap->isActive())
+        {
+            uint16_t flags = (uint16_t)((filterOn ? PcmTap::flagFilterActive : 0)
+                                        | (holding ? PcmTap::flagHeld : 0));
+            tap->push(outputChannelData, numOutputChannels, numSamples, sampleRate, flags, delaySamples);
+        }
+    }
+    
+    // A phone is watching: the speakers get silence, after the tap
+    if (localOutputMuted.load(std::memory_order_relaxed))
+    {
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData[ch] != nullptr)
+                std::fill(outputChannelData[ch], outputChannelData[ch] + numSamples, 0.0f);
+    }
 }
 
 void AudioEngine::whisperThreadFunction()

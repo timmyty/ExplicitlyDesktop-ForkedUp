@@ -10,6 +10,9 @@
 //    reaches you a few seconds late, so the picture is drawn on a canvas over the
 //    real video, delayed by exactly the app's current delay. Pausing and seeking
 //    stay in sync too: both keep playing out what was already buffered.
+//
+// In the tab that streams to a phone (remote.js), the phone gets the delayed
+// picture, so no overlay is drawn there; caption mode still runs.
 
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
@@ -24,10 +27,13 @@
   let generation = 0;       // Bumped on stop so stale capture/render loops exit
   let running = false;
   let shown = null;
+  // Shared with remote.js (same extension, same isolated world)
+  const shared = (globalThis.__explicitlySync ??= {});
+  shared.captionOn = () => caption.on;
 
   const active = () => status.running && status.enabled && !status.offline;
   // Delayed picture only when caption mode isn't handling this video
-  const overlayActive = () => active() && !caption.on;
+  const overlayActive = () => active() && !caption.on && !shared.remoteHost;
   const isYouTube = location.hostname.endsWith("youtube.com");
 
   function findVideo() {
@@ -333,7 +339,7 @@
         const current = findVideo();
         if (current !== video) { stop(); }
         start();
-      } else if (wasActive) {
+      } else if (wasActive || canvas) {
         stop();
       }
     }).catch(() => {});

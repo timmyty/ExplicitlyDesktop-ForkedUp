@@ -23,6 +23,10 @@
 #include "AudioEngine.h"
 #include "ControlServer.h"
 #include "AppRouter.h"
+#include "PcmTap.h"
+#include "RemoteSessions.h"
+#include "PairedDevices.h"
+#include "StreamHost.h"
 
 /** "Actual Lyrics" panel. Plain text draws like a Label; four newline-separated
     lines (previous, current, next, after next) draw karaoke style with the
@@ -88,6 +92,13 @@ private:
     void updateLyricsStatus();
     void restoreSettings();
     void saveSettings();
+    
+    // Phone streaming (docs/MOBILE_STREAMING.md)
+    void setPhoneStreaming (bool on);
+    void showPairingCode();
+    void showPairApproval (const juce::String& deviceName, std::function<void (bool)> decide);
+    void showPairedPhones();
+    void updatePhoneStatus();
     
     // GUI Components - Controls
     juce::Label titleLabel;
@@ -163,6 +174,20 @@ private:
     // Testing mode toggle
     juce::ToggleButton testingModeToggle;
     
+    // Phone streaming controls
+    juce::ToggleButton phoneStreamingToggle;     // "Allow phone streaming" (off by default)
+    juce::TextButton pairPhoneButton;            // Shows the QR code
+    juce::TextButton phonesButton;               // Paired phones, with Revoke
+    juce::ToggleButton alsoPlayHereToggle;       // "Also play on this PC" while a phone watches
+    juce::Label phoneStatusLabel;
+    juce::Component::SafePointer<juce::DialogWindow> pairingWindow;
+    juce::String phoneAddress;                   // LAN address shown to phones
+    int phoneTicks = 0;
+    
+    // Declared before the engine so they outlive its audio callback
+    std::unique_ptr<PcmTap> pcmTap;              // Filtered output for the /pcm stream
+    RemoteSessions remoteSessions;               // Phone offers <-> browser extension
+    
     // Audio Engine
     std::unique_ptr<AudioEngine> audioEngine;
     bool outputOverridden = false;
@@ -172,6 +197,8 @@ private:
     int snapshotCountdown = 0;   // EXPLICITLY_OUTPUT_DEVICE (testing): don't save it
     juce::ApplicationProperties appProperties;     // Remembers devices, mode and toggle
     std::unique_ptr<ControlServer> controlServer;   // Lets the browser extension sync video delay
+    std::unique_ptr<PairedDevices> pairedDevices;   // Phones allowed to stream (devices.json)
+    std::unique_ptr<StreamHost> streamHost;         // LAN server for phones (port 8767), off by default
     bool isProcessing = false;
     juce::String debugLog;
     juce::String recentLyrics;         // Store recent words for live display (Whisper)

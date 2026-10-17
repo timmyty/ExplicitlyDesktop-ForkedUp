@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Test phone</title></head>
+<body>
+<!-- The phone's side of docs/STREAMING_PROTOCOL.md §4 (no pairing/signing:
+     the harness hands the offer to the fake app directly). It measures when
+     each white flash is shown and when each beep is heard. -->
+<video id="v" playsinline autoplay style="width:320px"></video>
+<script>
+const R = window.R = { flashes: [], beeps: [], msgs: [], state: null, open: false, errors: [] };
+const video = document.getElementById("v");
+const pc = window.pc = new RTCPeerConnection({ iceServers: [] });
+pc.addTransceiver("video", { direction: "recvonly" });
+pc.addTransceiver("audio", { direction: "recvonly" });
+const dc = pc.createDataChannel("control", { ordered: true });
+dc.onopen = () => { R.open = true; };
+dc.onclose = () => { R.open = false; };
+dc.onmessage = (e) => { const m = JSON.parse(e.data); R.msgs.push(m); if (m.t === "state") R.state = m; };
+window.send = (m) => dc.send(JSON.stringify(m));
+
+const stream = new MediaStream();
+pc.ontrack = (e) => {
+  stream.addTrack(e.track);
+  video.srcObject = stream;
+  video.play().catch((err) => R.errors.push("play: " + err.message));
+  if (e.track.kind === "audio") { listen(e.track); tapTrack(e.track); }
+  if (e.track.kind === "video") tapTrack(e.track);
+  if (e.track.kind === "video") video.requestVideoFrameCallback(onFrame);
+};
+
+// Flash: average brightness of each shown frame
+const canvas = new OffscreenCanvas(32, 18);
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+let bright = false;
+function onFrame(_now, md) {
+  ctx.drawImage(video, 0, 0, 32, 18);
+  const d = ctx.getImageData(0, 0, 32, 18).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+  const lum = sum / (d.length / 4) / 3;
+  if (!bright && lum > 128) R.flashes.push(md.expectedDisplayTime);
+  if (lum > 128) bright = true; else if (lum < 64) bright = false;
+  video.requestVideoFrameCallback(onFrame);
+}
+
+// Beep: first loud sample after silence, in the audio context's clock
+const DETECTOR = `
+class Detector extends AudioWorkletProcessor {
+  constructor() { super(); this.on = false; this.quiet = 0; }
+  process(inputs) {
+    const x = inputs[0][0];
+    if (!x) return true;
+    for (let i = 0; i < x.length; i++) {
+      const a = Math.abs(x[i]);
+      if (!this.on && a > 0.2) { this.on = true; this.quiet = 0; this.port.postMessage(currentTime + i / sampleRate); }
+      if (this.on) { this.quiet = a < 0.02 ? this.quiet + 1 : 0; if (this.quiet > 2400) this.on = false; }
+    }
+    return true;
+  }
+}
+registerProcessor("detector", Detector);`;
+async function listen(track) {
+  const ac = new AudioContext();
+  await ac.audioWorklet.addModule(URL.createObjectURL(new Blob([DETECTOR], { type: "text/javascript" })));
+  const node = new AudioWorkletNode(ac, "detector");
+  ac.createMediaStreamSource(new MediaStream([track])).connect(node);
+  node.connect(ac.destination);
+  node.port.onmessage = (e) => {
+    const ts = ac.getOutputTimestamp();
+    R.beeps.push(ts.performanceTime + (e.data - ts.contextTime) * 1000);
+  };
+  R.audioState = ac.state;
+  ac.resume();
+}
+
+// Second measurement at the track level (MediaStreamTrackProcessor): when the
+// beep's first loud audio chunk and the first white frame leave the receiver's
+// jitter buffers. No WebAudio or compositor latency in either
+R.tFlashes = []; R.tBeeps = [];
+async function tapTrack(track) {
+  if (typeof MediaStreamTrackProcessor !== "function") return;
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  const c = new OffscreenCanvas(16, 9), g = c.getContext("2d", { willReadFrequently: true });
+  let on = false, quiet = 0;
+  for (;;) {
+    const { value: f, done } = await reader.read();
+    if (done) return;
+    const at = performance.now();
+    if (track.kind === "video") {
+      g.drawImage(f, 0, 0, 16, 9);
+      const d = g.getImageData(0, 0, 16, 9).data;
+      let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i];
+      const bright = sum / (d.length / 4) > 128;
+      if (bright && !on) R.tFlashes.push(at);
+      on = bright;
+    } else {
+      const x = new Float32Array(f.numberOfFrames);
+      f.copyTo(x, { planeIndex: 0, format: "f32-planar" });
+      for (let i = 0; i < x.length; i++) {
+        const a = Math.abs(x[i]);
+        if (!on && a > 0.2) { on = true; quiet = 0; R.tBeeps.push(at + i / f.sampleRate * 1000); }
+        if (on) { quiet = a < 0.02 ? quiet + 1 : 0; if (quiet > 2400) on = false; }
+      }
+    }
+    f.close();
+  }
+}
+
+(async () => {
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise((r) => { if (pc.iceGatheringState === "complete") r(); pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === "complete") r(); }; setTimeout(r, 2000); });
+  const res = await fetch("/test/offer", { method: "POST", body: JSON.stringify({ sdp: pc.localDescription.sdp }) });
+  const ans = await res.json();
+  if (!ans.sdp) { R.errors.push("no answer: " + JSON.stringify(ans)); return; }
+  R.answer = ans.sdp;
+  await pc.setRemoteDescription({ type: "answer", sdp: ans.sdp });
+})().catch((e) => R.errors.push(e.message));
+
+// Receiver-side sync on its own: what audio and video are playing out, in the
+// sender's capture clock (RTCP mapping), sampled together
+R.sync = [];
+setInterval(async () => {
+  const p = {};
+  (await pc.getStats()).forEach((s) => { if (s.type === "inbound-rtp" && s.estimatedPlayoutTimestamp) p[s.kind] = s.estimatedPlayoutTimestamp; });
+  if (p.audio && p.video) R.sync.push(p.video - p.audio);
+}, 250);
+
+// Codec and sync stats, for the report
+window.stats = async () => {
+  const out = {};
+  (await pc.getStats()).forEach((s) => {
+    if (s.type === "inbound-rtp") out[s.kind] = { codec: s.codecId, jitterBufferDelay: s.jitterBufferDelay / (s.jitterBufferEmittedCount || 1) * 1000, packetsLost: s.packetsLost, framesDecoded: s.framesDecoded, fps: s.framesPerSecond };
+  });
+  (await pc.getStats()).forEach((s) => { for (const k of ["audio", "video"]) if (out[k]?.codec === s.id) out[k].codec = s.mimeType + " " + (s.sdpFmtpLine || ""); });
+  return out;
+};
+</script>
+</body>
+</html>

@@ -52,6 +52,14 @@ set(SOURCES
     Source/ControlServer.cpp
     Source/LyricsGuide.cpp
     Source/AppRouter.cpp
+    # Phone streaming (docs/MOBILE_STREAMING.md)
+    Source/StreamCrypto.cpp
+    Source/PcmTap.cpp
+    Source/RemoteSessions.cpp
+    Source/HttpServerUtil.cpp
+    Source/PairedDevices.cpp
+    Source/StreamHost.cpp
+    ThirdParty/qrcodegen/qrcodegen.cpp
 )
 
 # Create executable
@@ -69,6 +77,7 @@ target_sources(ExplicitlyDesktop PRIVATE ${SOURCES})
 # Add header files
 target_include_directories(ExplicitlyDesktop PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/qrcodegen
 )
 
 # Link JUCE modules
@@ -93,6 +102,9 @@ if(WIN32)
         ${WHISPER_BUILD_DIR}/src/Release/whisper.lib
         windowsapp.lib  # Windows Runtime for Media Control
         ws2_32.lib      # Sockets for the local control server
+        bcrypt.lib      # Random numbers for phone pairing keys
+        crypt32.lib     # DPAPI: phone keys in devices.json
+        iphlpapi.lib    # The PC's LAN address for the pairing QR code
     )
     
     # Copy whisper/ggml DLLs (CUDA build if present, else the CPU build) next to the exe
@@ -119,6 +131,16 @@ add_custom_command(TARGET ExplicitlyDesktop POST_BUILD
         $<TARGET_FILE_DIR:ExplicitlyDesktop>/Models
     COMMENT "Copying Models folder to output directory"
 )
+
+# Copy the phone page (served by StreamHost on port 8767) to the output directory
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/MobileClient")
+    add_custom_command(TARGET ExplicitlyDesktop POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/MobileClient
+            $<TARGET_FILE_DIR:ExplicitlyDesktop>/MobileClient
+        COMMENT "Copying MobileClient folder to output directory"
+    )
+endif()
 
 # Copy lexicons folder to output directory
 add_custom_command(TARGET ExplicitlyDesktop POST_BUILD
@@ -177,6 +199,13 @@ set_target_properties(WhisperTest PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
+# Unit tests for the phone streaming code (no JUCE or audio device needed):
+#   cmake --build build --config Release --target ExplicitlyTests
+#   build\bin\Release\ExplicitlyTests.exe
+enable_testing()
+add_subdirectory(tests/cpp EXCLUDE_FROM_ALL)
+set_target_properties(ExplicitlyTests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 message(STATUS "===========================================")
 message(STATUS "Explicitly Desktop Configuration")
 message(STATUS "===========================================")
@@ -184,5 +213,5 @@ message(STATUS "JUCE Directory: ${JUCE_DIR}")
 message(STATUS "Whisper SDK Directory: ${WHISPER_SDK_DIR}")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "Targets: ExplicitlyDesktop, WhisperTest")
+message(STATUS "Targets: ExplicitlyDesktop, WhisperTest, ExplicitlyTests")
 message(STATUS "==========================================")

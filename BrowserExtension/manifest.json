@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Explicitly Video Sync",
-  "version": "1.2.0",
-  "description": "Keeps YouTube and Steam store video in step with Explicitly Desktop: mutes captioned YouTube videos with no delay, otherwise delays the picture to match the filtered audio.",
+  "version": "1.3.0",
+  "description": "Keeps YouTube and Steam store video in step with Explicitly Desktop: mutes captioned YouTube videos with no delay, otherwise delays the picture to match the filtered audio. Also streams a YouTube video with the filtered audio to a paired phone.",
   "permissions": [
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "http://127.0.0.1:8766/*",
@@ -16,6 +17,7 @@
   "background": {
     "service_worker": "background.js",
     "scripts": [
+      "remote-core.js",
       "background.js"
     ]
   },
@@ -40,6 +42,29 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
+      ],
+      "js": [
+        "remote-core.js",
+        "pcm-worklet.js",
+        "remote.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pcm-worklet.js"
+      ],
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
+      ]
     }
   ],
   "action": {

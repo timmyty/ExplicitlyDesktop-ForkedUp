@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "notes": "Interop vectors for docs/STREAMING_PROTOCOL.md. All strings UTF-8; hex lowercase. Checked by tests/cpp (C++) and tests/js.",
+  "pairing": {
+    "P_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+    "P_b32": "UCQ2FI5EUWTKPKFJVKV2ZLNOV4",
+    "typedCode": "UCQ2-FI5E-UWTK-PKFJ-VKV2-ZLNO-V4",
+    "hostId": "5f0e8c1d2b3a49c6a7d8e9f0a1b2c3d4",
+    "qrUrl": "http://192.168.1.20:8767/#pair=UCQ2FI5EUWTKPKFJVKV2ZLNOV4&host=5f0e8c1d2b3a49c6a7d8e9f0a1b2c3d4",
+    "deviceId": "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+    "name": "Tim’s phone",
+    "nonce": "00112233445566778899aabbccddeeff",
+    "pairMacInput": "pair|6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b|Tim’s phone|00112233445566778899aabbccddeeff",
+    "pairMac": "3ecc0649d9bf32a27a2d10108768819af36d29e175fae17efae1b2c6f5526a54",
+    "K_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "padInput": "wrap|00112233445566778899aabbccddeeff",
+    "pad_hex": "1d2299de17f407c0204e462ed40cd134b81a122c59730441fdd7227ec650b4b6",
+    "wrapped": "3d03bbfd33d121e708676c05f821ff1b882b201f6d463276c5ee1845fa6d8a89",
+    "pairOkMacInput": "pair-ok|6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b|3d03bbfd33d121e708676c05f821ff1b882b201f6d463276c5ee1845fa6d8a89",
+    "pairOkMac": "5c5791117234d647f1b58c944acd01af1825d6e1cb14652825671ea7943bc1a7"
+  },
+  "signedRequest": {
+    "K_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "method": "POST",
+    "path": "/api/session/offer",
+    "deviceId": "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+    "time": "1760000000000",
+    "nonce": "ffeeddccbbaa99887766554433221100",
+    "body": "{\"sdp\":\"v=0\\r\\no=- 1 2 IN IP4 127.0.0.1\\r\\n\"}",
+    "bodySha256": "eda49e97eec3a3c4ae1e32ede52c759fa5913cfc9348992f95897240b7f91616",
+    "macInput": "POST|/api/session/offer|6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b|1760000000000|ffeeddccbbaa99887766554433221100|eda49e97eec3a3c4ae1e32ede52c759fa5913cfc9348992f95897240b7f91616",
+    "mac": "c8acf8a67500a5e3504df1837893784f67f97500cd94d77ab385a63e96abcfe8",
+    "responseBody": "{\"sessionId\":\"s-1\",\"sdp\":\"v=0\\r\\n\"}",
+    "responseMacInput": "resp|/api/session/offer|ffeeddccbbaa99887766554433221100|bcecc4124377c09d49c83036618cb5902d8043fe000f16a339dbc629e0f33787",
+    "responseMac": "b52338586229cadb9f617cf3ad905ba674caf0015bff7292a53d166376b25966"
+  },
+  "primitives": {
+    "sha256_empty": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sha256_abc": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    "hmac_rfc4231_tc2_key": "Jefe",
+    "hmac_rfc4231_tc2_data": "what do ya want for nothing?",
+    "hmac_rfc4231_tc2": "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+    "base32_foobar": "MZXW6YTBOI",
+    "base32_f": "MY",
+    "ws_key": "dGhlIHNhbXBsZSBub25jZQ==",
+    "ws_accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+  },
+  "pcmFrame": {
+    "sampleRate": "48000",
+    "channels": "2",
+    "flags": "3",
+    "startSample": "0",
+    "frames": "2",
+    "delaySamples": "168000",
+    "floatSamples": "0.0,1.0,-1.0,0.5",
+    "int16Samples": "0,32767,-32767,16384",
+    "conversion": "int16 = round-half-away-from-zero(clamp(x, -1, 1) * 32767)",
+    "frame_hex": "4558504380bb000002000300000000000000000002000000409002000000ff7f01800040"
+  }
+}

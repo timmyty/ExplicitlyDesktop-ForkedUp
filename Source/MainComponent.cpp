@@ -11,6 +11,7 @@
 */
 
 #include "MainComponent.h"
+#include "PairingQrView.h"
 
 #ifdef max
 #undef max
@@ -201,8 +202,38 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible (testingModeToggle);
     
+    // Phone streaming: off until the user allows it
+    phoneStreamingToggle.setButtonText ("Allow phone streaming");
+    phoneStreamingToggle.setToggleState (false, juce::dontSendNotification);
+    phoneStreamingToggle.onClick = [this]
+    {
+        setPhoneStreaming (phoneStreamingToggle.getToggleState());
+        saveSettings();
+    };
+    addAndMakeVisible (phoneStreamingToggle);
+    
+    pairPhoneButton.setButtonText ("Pair a phone");
+    pairPhoneButton.onClick = [this] { showPairingCode(); };
+    addAndMakeVisible (pairPhoneButton);
+    
+    phonesButton.setButtonText ("Phones");
+    phonesButton.onClick = [this] { showPairedPhones(); };
+    addAndMakeVisible (phonesButton);
+    
+    alsoPlayHereToggle.setButtonText ("Also play on this PC");
+    alsoPlayHereToggle.setToggleState (false, juce::dontSendNotification);
+    alsoPlayHereToggle.onClick = [this] { updatePhoneStatus(); saveSettings(); };
+    addAndMakeVisible (alsoPlayHereToggle);
+    
+    phoneStatusLabel.setText ("Phone streaming off", juce::dontSendNotification);
+    addAndMakeVisible (phoneStatusLabel);
+    
     // Initialize audio engine
     audioEngine = std::make_unique<AudioEngine>();
+    
+    // Filtered output for the phone's audio track (does nothing until a client connects)
+    pcmTap = std::make_unique<PcmTap>();
+    audioEngine->setPcmTap (pcmTap.get());
     
     // Set debug callback
     audioEngine->setDebugCallback ([this](const juce::String& msg) {
@@ -256,10 +287,29 @@ MainComponent::MainComponent()
     });
     
     // Local control port for the browser extension (YouTube video delay sync)
-    controlServer = std::make_unique<ControlServer> (*audioEngine);
+    controlServer = std::make_unique<ControlServer> (*audioEngine, remoteSessions, *pcmTap);
     controlServer->onFilterChanged = [this] { updateFilterButton(); saveSettings(); };
     controlServer->start();
     updateFilterButton();
+    
+    // Phone streaming LAN server (started by the "Allow phone streaming" toggle)
+    pairedDevices = std::make_unique<PairedDevices>();
+    streamHost = std::make_unique<StreamHost> (*audioEngine, *pairedDevices, remoteSessions);
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    streamHost->onApprovalRequest = [safeThis] (const juce::String& deviceName, std::function<void (bool)> decide)
+    {
+        juce::MessageManager::callAsync ([safeThis, deviceName, decide]
+        {
+            if (safeThis == nullptr)
+                decide (false);
+            else
+                safeThis->showPairApproval (deviceName, decide);
+        });
+    };
+    streamHost->onDevicesChanged = [safeThis]
+    {
+        juce::MessageManager::callAsync ([safeThis] { if (safeThis != nullptr) safeThis->updatePhoneStatus(); });
+    };
     
     // Populate device lists, then restore last session (and auto-start if configured)
     updateDeviceList();
@@ -272,9 +322,17 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    if (pairingWindow != nullptr)
+        delete pairingWindow.getComponent();
+    
+    // Wake anything waiting on a phone session, then stop both servers
+    remoteSessions.endAllSessions ("host closed");
+    remoteSessions.shutdown();
+    streamHost.reset();
     controlServer.reset();
     if (isProcessing)
         stopProcessing();
+    audioEngine->setPcmTap (nullptr);
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -334,7 +392,18 @@ void MainComponent::resized()
     auto levelRow = area.removeFromTop (30);
     levelLabel.setBounds (levelRow.removeFromLeft (120));
     levelValueLabel.setBounds (levelRow);
-    area.removeFromTop (20);
+    area.removeFromTop (10);
+    
+    // Phone streaming
+    auto phoneRow = area.removeFromTop (30);
+    phoneStreamingToggle.setBounds (phoneRow.removeFromLeft (180));
+    pairPhoneButton.setBounds (phoneRow.removeFromLeft (110).reduced (0, 2));
+    phoneRow.removeFromLeft (6);
+    phonesButton.setBounds (phoneRow.removeFromLeft (100).reduced (0, 2));
+    phoneRow.removeFromLeft (14);
+    alsoPlayHereToggle.setBounds (phoneRow.removeFromLeft (170));
+    phoneStatusLabel.setBounds (phoneRow);
+    area.removeFromTop (10);
     
     // Actual lyrics display (large, prominent - shows correct lyrics)
     actualLyricsLabel.setBounds (area.removeFromTop (25));
@@ -406,6 +475,8 @@ void MainComponent::timerCallback()
             std::cout << "[Snapshot] Saved " << file.getFullPathName() << std::endl;
         }
     }
+    
+    updatePhoneStatus();
     
     if (isProcessing)
     {
@@ -569,6 +640,14 @@ void MainComponent::restoreSettings()
     censorModeCombo.setSelectedId (settings->getIntValue ("censorMode", 2), juce::dontSendNotification);
     audioEngine->setFilterEnabled (settings->getBoolValue ("filterEnabled", true));
     
+    // Phone streaming stays off unless the user turned it on
+    alsoPlayHereToggle.setToggleState (settings->getBoolValue ("alsoPlayOnPc", false), juce::dontSendNotification);
+    if (settings->getBoolValue ("phoneStreaming", false))
+    {
+        phoneStreamingToggle.setToggleState (true, juce::dontSendNotification);
+        setPhoneStreaming (true);
+    }
+    
     // Apps sent through the filter (exe names)
     appRouter.setApps (juce::StringArray::fromTokens (
         settings->getValue ("routedApps", "Spotify.exe,firefox.exe,chrome.exe,brave.exe"), ",", ""));
@@ -606,6 +685,8 @@ void MainComponent::saveSettings()
     settings->setValue ("filterEnabled", audioEngine->isFilterEnabled());
     settings->setValue ("routedApps", appRouter.getApps().joinIntoString (","));
     settings->setValue ("whisperModel", juce::String (audioEngine->getWhisperModel()));
+    settings->setValue ("phoneStreaming", phoneStreamingToggle.getToggleState());
+    settings->setValue ("alsoPlayOnPc", alsoPlayHereToggle.getToggleState());
     if (isProcessing)
         settings->setValue ("autoStart", true);
     settings->saveIfNeeded();
@@ -977,4 +1058,174 @@ void MainComponent::updateActualLyrics(const juce::String& words)
     actualLyricsDisplay.setText(recentActualLyrics, juce::dontSendNotification);
     actualLyricsDisplay.setColour(juce::Label::textColourId, juce::Colours::white);
     actualLyricsDisplay.setColour(juce::Label::backgroundColourId, juce::Colours::black);
+}
+
+//==============================================================================
+// Phone streaming
+
+void MainComponent::setPhoneStreaming (bool on)
+{
+    if (on)
+    {
+        if (! streamHost->isRunning() && ! streamHost->start())
+        {
+            phoneStreamingToggle.setToggleState (false, juce::dontSendNotification);
+            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Phone streaming",
+                "Could not open port " + juce::String (streamHost->getPort())
+                + ". Is another copy of Explicitly Desktop running?");
+        }
+        phoneAddress = StreamHost::findLanAddress();
+    }
+    else
+    {
+        if (pairingWindow != nullptr)
+            delete pairingWindow.getComponent();
+        remoteSessions.endAllSessions ("host closed");
+        streamHost->stop();
+    }
+    
+    updatePhoneStatus();
+}
+
+void MainComponent::showPairingCode()
+{
+    if (! streamHost->isRunning())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon, "Pair a phone",
+                                                "Turn on \"Allow phone streaming\" first.");
+        return;
+    }
+    
+    if (pairingWindow != nullptr)
+        delete pairingWindow.getComponent();
+    
+    phoneAddress = StreamHost::findLanAddress();
+    if (phoneAddress.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Pair a phone",
+                                                "This PC doesn't seem to be on a network. Connect it to the "
+                                                "same Wi-Fi or router as the phone and try again.");
+        return;
+    }
+    
+    auto code = streamHost->beginPairing();
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (new PairingQrView (code.url, code.typedCode, code.expires, [safeThis]
+    {
+        // Closing the window withdraws the code
+        if (safeThis != nullptr)
+            safeThis->streamHost->cancelPairing();
+    }));
+    options.dialogTitle = "Pair a phone";
+    options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    pairingWindow = options.launchAsync();
+}
+
+void MainComponent::showPairApproval (const juce::String& deviceName, std::function<void (bool)> decide)
+{
+    // The code has been used: the QR code is no longer needed
+    if (pairingWindow != nullptr)
+        delete pairingWindow.getComponent();
+    
+    juce::AlertWindow::showOkCancelBox (juce::AlertWindow::QuestionIcon, "Allow this phone?",
+        "Allow \"" + deviceName + "\" to play videos and control Explicitly Desktop?",
+        "Allow", "Deny", this,
+        juce::ModalCallbackFunction::create ([decide, safeThis = juce::Component::SafePointer<MainComponent> (this)] (int result)
+        {
+            decide (result == 1);
+            if (safeThis != nullptr)
+                safeThis->updatePhoneStatus();
+        }));
+}
+
+void MainComponent::showPairedPhones()
+{
+    auto devices = pairedDevices->getDevices();
+    
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Paired phones");
+    if (devices.empty())
+        menu.addItem (-1, "No phones paired yet", false);
+    
+    for (size_t i = 0; i < devices.size(); ++i)
+    {
+        auto lastSeen = juce::Time::fromISO8601 (devices[i].lastSeen);
+        menu.addItem ((int) i + 1, "Revoke " + juce::String::fromUTF8 (devices[i].name.c_str())
+                                       + "   (last seen " + lastSeen.formatted ("%d %b %Y %H:%M") + ")");
+    }
+    
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&phonesButton),
+                        [safeThis, devices] (int result)
+    {
+        if (safeThis == nullptr || result <= 0 || result > (int) devices.size())
+            return;
+        
+        auto device = devices[(size_t) result - 1];
+        auto name = juce::String::fromUTF8 (device.name.c_str());
+        juce::AlertWindow::showOkCancelBox (juce::AlertWindow::WarningIcon, "Revoke phone",
+            "Remove \"" + name + "\"? It will have to be paired again to stream.",
+            "Revoke", "Cancel", safeThis.getComponent(),
+            juce::ModalCallbackFunction::create ([safeThis, device] (int confirm)
+            {
+                if (confirm != 1 || safeThis == nullptr)
+                    return;
+                safeThis->remoteSessions.endSessionsForDevice (device.deviceId, "revoked");
+                safeThis->pairedDevices->removeDevice (device.deviceId);
+                safeThis->updatePhoneStatus();
+            }));
+    });
+}
+
+void MainComponent::updatePhoneStatus()
+{
+    // Refresh the LAN address now and then (Wi-Fi changes)
+    if (streamHost->isRunning() && ++phoneTicks >= 100)
+    {
+        phoneTicks = 0;
+        phoneAddress = StreamHost::findLanAddress();
+    }
+    
+    auto state = remoteSessions.getState();
+    bool connected = state.active && remoteSessions.isExtensionAvailable();
+    
+    // While a phone watches, the speakers are silenced after the PCM tap (no echo)
+    audioEngine->setLocalOutputMuted (connected && ! alsoPlayHereToggle.getToggleState());
+    
+    // A pause left behind by a browser that went away must not keep the audio silent
+    if (! connected && audioEngine->isHeld() && ! controlServer->isPcmClientConnected())
+        audioEngine->setHeld (false);
+    
+    juce::String text;
+    juce::Colour colour = juce::Colours::grey;
+    if (! streamHost->isRunning())
+    {
+        text = "Phone streaming off";
+    }
+    else if (connected)
+    {
+        text = "Phone connected: " + juce::String::fromUTF8 (state.deviceName.c_str());
+        colour = juce::Colours::lightgreen;
+    }
+    else
+    {
+        text = "Ready on http://" + (phoneAddress.isNotEmpty() ? phoneAddress : juce::String ("?"))
+               + ":" + juce::String (streamHost->getPort());
+        colour = juce::Colours::white;
+    }
+    
+    if (phoneStatusLabel.getText() != text)
+    {
+        phoneStatusLabel.setText (text, juce::dontSendNotification);
+        phoneStatusLabel.setColour (juce::Label::textColourId, colour);
+    }
+    
+    auto count = pairedDevices->getDevices().size();
+    phonesButton.setButtonText ("Phones (" + juce::String ((int) count) + ")");
+    pairPhoneButton.setEnabled (streamHost->isRunning());
 }
