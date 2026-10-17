@@ -99,8 +99,18 @@ WindowsMediaInfo::MediaInfo WindowsMediaInfo::getCurrentMedia()
         if (sessionManager == nullptr)
             return info;
         
-        // Get the current session (foreground media app)
+        // Prefer whichever app is actually playing (e.g. YouTube while Spotify
+        // sits paused); fall back to Windows' current session
         auto currentSession = sessionManager.GetCurrentSession();
+        for (auto const& session : sessionManager.GetSessions())
+        {
+            if (session.GetPlaybackInfo().PlaybackStatus()
+                == winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
+            {
+                currentSession = session;
+                break;
+            }
+        }
         
         if (currentSession == nullptr)
             return info;
@@ -120,7 +130,6 @@ WindowsMediaInfo::MediaInfo WindowsMediaInfo::getCurrentMedia()
             info.album = winrt::to_string(props.AlbumTitle());
         }
         
-        std::cout << "[MediaInfo] Retrieved: " << info.artist << " - " << info.title << std::endl;
     }
     catch (const std::exception& e)
     {

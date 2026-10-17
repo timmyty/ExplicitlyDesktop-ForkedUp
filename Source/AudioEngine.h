@@ -37,6 +37,7 @@
 #include "TimestampRefiner.h"
 #include "SongRecognition.h"
 #include "WindowsMediaInfo.h"
+#include "LyricsGuide.h"
 #include "Types.h"
 
 class AudioEngine : public juce::AudioIODeviceCallback
@@ -116,6 +117,12 @@ public:
         local status server that keeps browser video in sync.
     */
     FilterStatus getFilterStatus() const;
+    
+    /** Lyrics guide state for the UI (song, where lyrics came from, following). */
+    LyricsGuide::Status getLyricsStatus() const
+    {
+        return lyricsGuide != nullptr ? lyricsGuide->getStatus() : LyricsGuide::Status();
+    }
 
     /**
         Enable/disable testing mode.
@@ -237,6 +244,8 @@ private:
     VocalFilter vocalFilter;
     TimestampRefiner timestampRefiner;  // Phase 6: Accurate timestamp refinement
     LyricsAlignment lyricsAlignment;     // Phase 7: Lyrics alignment
+    std::unique_ptr<LyricsGuide> lyricsGuide;  // Checks Whisper against the song's lyrics
+    double lastMediaPollTime = 0.0;
     
     // Phase 7 (Idea 2): Song Recognition & Lyrics Alignment
     WindowsMediaInfo windowsMediaInfo;

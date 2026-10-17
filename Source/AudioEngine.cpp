@@ -114,6 +114,8 @@ AudioEngine::AudioEngine()
         std::cout << "[Phase4] Profanity filter loaded" << std::endl;
     }
     
+    lyricsGuide = std::make_unique<LyricsGuide>(profanityFilter);
+    
     // Phase 5: Load Whisper model at startup (faster "Start Processing" button response)
     std::cout << "[Phase5] Loading Whisper model at startup..." << std::endl;
     whisper_context_params cparams = whisper_context_default_params();
@@ -288,46 +290,8 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
                     });
                 }
                 
-                // Fetch lyrics ASYNCHRONOUSLY - don't block audio thread
-                if (!info.title.empty() && !info.artist.empty())
-                {
-                    std::cout << "[MediaInfo] Fetching lyrics in background..." << std::endl;
-                    
-                    // Disable alignment immediately and reset state (use raw Whisper for first ~2s)
-                    useLyricsAlignment = false;
-                    lyricsAlignment.reset();
-                    songLyrics.clear();
-                    
-                    // Copy to local variables for thread capture
-                    std::string artist = info.artist;
-                    std::string title = info.title;
-                    
-                    // Launch background thread
-                    std::thread([this, artist, title]() {
-                        std::cout << "[LyricsFetch] Background fetch started for: " 
-                                 << artist << " - " << title << std::endl;
-                        
-                        SongInfo lyricsInfo = LyricsAlignment::fetchLyrics(artist, title);
-                        
-                        // Post result back to message thread
-                        juce::MessageManager::callAsync([this, lyricsInfo]() {
-                            if (!lyricsInfo.lyrics.empty())
-                            {
-                                songLyrics = lyricsInfo.lyrics;
-                                lyricsAlignment.reset();
-                                lyricsAlignment.setLyrics(songLyrics);
-                                // useLyricsAlignment = true;  // DISABLED FOR TESTING
-                                
-                                std::cout << "[LyricsFetch] ✓ Lyrics ready! Alignment DISABLED for testing (" 
-                                         << songLyrics.length() << " chars)" << std::endl;
-                            }
-                            else
-                            {
-                                std::cout << "[LyricsFetch] ✗ No lyrics found - using raw Whisper" << std::endl;
-                            }
-                        });
-                    }).detach();
-                }
+                // Lyrics lookup and matching happen in the lyrics guide
+                lyricsGuide->setSong(info.artist, info.title);
             });
             
             // Get initial media info immediately
@@ -347,37 +311,7 @@ bool AudioEngine::start(const juce::String& inputDeviceName,
                                    1.0f);
                 }
                 
-                // Fetch initial lyrics ASYNCHRONOUSLY
-                std::cout << "[MediaInfo] Fetching initial lyrics in background..." << std::endl;
-                useLyricsAlignment = false;  // Use raw Whisper initially
-                
-                // Copy to local variables for thread capture
-                std::string artist = initialInfo.artist;
-                std::string title = initialInfo.title;
-                
-                std::thread([this, artist, title]() {
-                    std::cout << "[LyricsFetch] Background fetch started for: " 
-                             << artist << " - " << title << std::endl;
-                    
-                    SongInfo lyricsInfo = LyricsAlignment::fetchLyrics(artist, title);
-                    
-                    juce::MessageManager::callAsync([this, lyricsInfo]() {
-                        if (!lyricsInfo.lyrics.empty())
-                        {
-                            songLyrics = lyricsInfo.lyrics;
-                            lyricsAlignment.reset();
-                            lyricsAlignment.setLyrics(songLyrics);
-                            // useLyricsAlignment = true;  // DISABLED FOR TESTING
-                            
-                            std::cout << "[LyricsFetch] ✓ Initial lyrics ready! Alignment DISABLED for testing (" 
-                                     << songLyrics.length() << " chars)" << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << "[LyricsFetch] ✗ No initial lyrics found" << std::endl;
-                        }
-                    });
-                }).detach();
+                lyricsGuide->setSong(initialInfo.artist, initialInfo.title);
             }
             
             // Disable audio fingerprinting since we have Windows Media Control
@@ -1245,87 +1179,24 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
         // Apply lyrics alignment if enabled (sliding window approach)
         std::vector<WordSegment> finalWords = transcribedWords;
         
-        // Periodic song change detection (works with or without lyrics)
-        static auto lastPeriodicCheck = std::chrono::steady_clock::now();
+        // Follow what's playing (Spotify, browsers) every few seconds; the lyrics
+        // guide ignores repeats and looks up lyrics for new songs in the background
+        static auto lastMediaPoll = std::chrono::steady_clock::now() - std::chrono::seconds(10);
         auto now = std::chrono::steady_clock::now();
-        auto timeSinceLastCheck = std::chrono::duration_cast<std::chrono::seconds>(now - lastPeriodicCheck).count();
-        
-        bool shouldCheckForNewSong = false;
-        
-        if (useLyricsAlignment && !songLyrics.empty())
+        // EXPLICITLY_DEBUG_SONG="Artist|Title" pins the song (for testing with clips
+        // that don't show up in Windows' now-playing info)
+        static const char* debugSong = std::getenv("EXPLICITLY_DEBUG_SONG");
+        if (debugSong != nullptr)
         {
-            std::cout << "[Phase5] Applying lyrics alignment with sliding window..." << std::endl;
-            
-            // Check if we're near end of lyrics (auto-queued song detection)
-            if (lyricsAlignment.isReady())
-            {
-                int currentPos = lyricsAlignment.getCurrentPosition();
-                int totalWords = lyricsAlignment.getTotalWords();
-                
-                // If we're in the last 10% of lyrics, check if a new song is playing
-                if (totalWords > 0 && currentPos >= (totalWords * 0.90))
-                {
-                    // Check every 3 seconds when near end
-                    if (timeSinceLastCheck >= 3 && mediaInfoInitialized)
-                    {
-                        std::cout << "[EndOfSong] Near lyrics end (" << currentPos << "/" << totalWords 
-                                 << ") - checking for queued song..." << std::endl;
-                        shouldCheckForNewSong = true;
-                    }
-                }
-            }
+            juce::String pinned(debugSong);
+            lyricsGuide->setSong(pinned.upToFirstOccurrenceOf("|", false, false).toStdString(),
+                                 pinned.fromFirstOccurrenceOf("|", false, false).toStdString());
         }
-        else
+        else if (mediaInfoInitialized && now - lastMediaPoll >= std::chrono::seconds(3))
         {
-            // No lyrics loaded - check periodically (every 10 seconds)
-            // This handles songs without lyrics or failed lyrics fetches
-            if (timeSinceLastCheck >= 10 && mediaInfoInitialized)
-            {
-                std::cout << "[PeriodicCheck] No lyrics active - checking for song change..." << std::endl;
-                shouldCheckForNewSong = true;
-            }
-        }
-        
-        // Execute song change detection if triggered
-        if (shouldCheckForNewSong)
-        {
-            auto currentMedia = windowsMediaInfo.getCurrentMedia();
-            if (!currentMedia.title.empty())
-            {
-                // Check if this is a different song (basic title comparison)
-                if (currentMedia.title != lastSongTitle || currentMedia.artist != lastSongArtist)
-                {
-                    std::cout << "[SongChange] New song detected! " << currentMedia.artist 
-                             << " - " << currentMedia.title << std::endl;
-                    
-                    // Testing mode: Write log file for previous song before switching
-                    // Launch background lyrics fetch
-                    std::string artist = currentMedia.artist;
-                    std::string title = currentMedia.title;
-                    
-                    std::thread([this, artist, title]() {
-                        SongInfo lyricsInfo = LyricsAlignment::fetchLyrics(artist, title);
-                        
-                        juce::MessageManager::callAsync([this, lyricsInfo]() {
-                            if (!lyricsInfo.lyrics.empty())
-                            {
-                                songLyrics = lyricsInfo.lyrics;
-                                lyricsAlignment.reset();
-                                lyricsAlignment.setLyrics(songLyrics);
-                                // useLyricsAlignment = true;  // DISABLED FOR TESTING
-                                
-                                std::cout << "[SongChange] ✓ New song lyrics loaded! (ALIGNMENT DISABLED)" << std::endl;
-                            }
-                            else
-                            {
-                                std::cout << "[SongChange] ✗ No lyrics found for new song - using raw Whisper" << std::endl;
-                            }
-                        });
-                    }).detach();
-                }
-            }
-            
-            lastPeriodicCheck = now;
+            lastMediaPoll = now;
+            auto media = windowsMediaInfo.getCurrentMedia();
+            lyricsGuide->setSong(media.artist, media.title);
         }
         
         if (useLyricsAlignment && !songLyrics.empty())
@@ -1415,6 +1286,14 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
             });
         }
         
+        // Check Whisper's words against the song's lyrics, when we have them
+        LyricsGuide::Decision guide;
+        if (!useLyricsAlignment)
+            guide = lyricsGuide->analyze(finalWords, chunkSeconds);
+        
+        struct Hit { std::string text; double start; double end; bool multi; };
+        std::vector<Hit> hits;
+        
         // Check for single-word AND multi-word profanity
         std::vector<bool> wordAlreadyCensored(finalWords.size(), false);  // Track which words are already handled
         
@@ -1469,8 +1348,33 @@ void AudioEngine::processTranscription(const std::vector<float>& buffer, double 
                 }
             }
             
-            // Process the detected profanity (single or multi-word)
+            // Lyrics say a clean word is sung here: Whisper misheard, don't mute
+            if (foundProfanity && guide.aligned && guide.lyricsSayClean[idx]
+                && (!isMultiWord || guide.lyricsSayClean[idx + 1]))
+            {
+                std::cout << "[LyricsGuide] Not muting \"" << profanityText
+                          << "\": lyrics have a clean word here" << std::endl;
+                continue;
+            }
+            
             if (foundProfanity)
+                hits.push_back({ profanityText, profanityStart, profanityEnd, isMultiWord });
+        }
+        
+        // Profane lyrics words that Whisper misheard or missed
+        for (size_t k = 0; k < guide.extraMutes.size(); ++k)
+        {
+            std::cout << "[LyricsGuide] Muting from lyrics: " << guide.extraMuteWords[k] << std::endl;
+            hits.push_back({ guide.extraMuteWords[k], guide.extraMutes[k].first, guide.extraMutes[k].second, false });
+        }
+        
+        // Process the detected profanity (single or multi-word)
+        for (const auto& hit : hits)
+        {
+            const std::string& profanityText = hit.text;
+            double profanityStart = hit.start;
+            double profanityEnd = hit.end;
+            bool isMultiWord = hit.multi;
             {
                 // Skip censorship if buffer is critically low (emergency bypass)
                 if (bufferUnderrun.load())

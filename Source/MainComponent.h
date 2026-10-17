@@ -45,6 +45,7 @@ private:
     void updateLiveLyrics(const juce::String& words);
     void updateActualLyrics(const juce::String& words);
     void updateFilterButton();
+    void updateLyricsStatus();
     void restoreSettings();
     void saveSettings();
     

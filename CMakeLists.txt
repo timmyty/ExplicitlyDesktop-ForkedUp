@@ -42,6 +42,7 @@ set(SOURCES
     Source/SongRecognition.cpp
     Source/WindowsMediaInfo.cpp
     Source/ControlServer.cpp
+    Source/LyricsGuide.cpp
 )
 
 # Create executable

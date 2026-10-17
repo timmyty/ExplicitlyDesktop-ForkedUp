@@ -352,6 +352,7 @@ void MainComponent::timerCallback()
     {
         updateLatencyDisplay();
         updateFilterButton();
+        updateLyricsStatus();
         
         // Phase 1: Update level meter
         float level = audioEngine->getCurrentInputLevel();
@@ -518,6 +519,34 @@ void MainComponent::saveSettings()
     if (isProcessing)
         settings->setValue ("autoStart", true);
     settings->saveIfNeeded();
+}
+
+void MainComponent::updateLyricsStatus()
+{
+    auto status = audioEngine->getLyricsStatus();
+    if (status.song.empty())
+        return;
+    
+    juce::String text = juce::String (status.song) + "   |   Lyrics: ";
+    juce::Colour colour = juce::Colours::yellow;
+    
+    if (status.searching)
+        text << "looking up...";
+    else if (! status.hasLyrics)
+        text << "none found (Whisper only)";
+    else if (status.following)
+    {
+        text << "following (" << juce::String (status.source) << ")";
+        colour = juce::Colours::lightgreen;
+    }
+    else
+        text << "loaded, listening for a match (" << juce::String (status.source) << ")";
+    
+    if (songInfoDisplay.getText() != text)
+    {
+        songInfoDisplay.setText (text, juce::dontSendNotification);
+        songInfoDisplay.setColour (juce::Label::textColourId, colour);
+    }
 }
 
 void MainComponent::updateFilterButton()
