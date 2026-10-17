@@ -28,6 +28,10 @@ Undo with `-Restore`. Settings > System > Sound > Volume mixer shows the same se
   allow access to 127.0.0.1 and youtube.com. Firefox removes temporary add-ons when it restarts;
   keeping it permanently needs the add-on signed through addons.mozilla.org (unlisted).
 
+## Testing timing
+`EXPLICITLY_DEBUG_RECORD=<folder>` records 60 s of the app's input and output as WAVs;
+`EXPLICITLY_DEBUG_SONG="Artist|Title"` pins the song used for lyrics.
+
 ## Rebuild
     cmake -B build -G "Visual Studio 17 2022" -A x64
     cmake --build build --config Release

@@ -46,13 +46,18 @@ public:
         bool aligned = false;
         // Per Whisper word: true when the lyrics confidently say this word is clean
         std::vector<bool> lyricsSayClean;
-        // Profane lyrics words Whisper didn't flag: (start, end) seconds in the chunk
+        // Profane lyrics words Whisper didn't flag: (start, end) seconds in the chunk.
+        // Misheard words carry Whisper's word times (corrected like any Whisper hit);
+        // words Whisper missed are placed in real time already (extraMuteIsFinal)
         std::vector<std::pair<double, double>> extraMutes;
+        std::vector<bool> extraMuteIsFinal;
         std::vector<std::string> extraMuteWords;
+        // Lyrics line(s) this chunk matched, profanity masked, for display
+        std::string lyricsLines;
     };
 
     /** Called on the transcription thread for each chunk. */
-    Decision analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds);
+    Decision analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds, double startBias);
 
     struct Status
     {
@@ -72,6 +77,7 @@ private:
     {
         std::string text;
         bool profane = false;
+        int line = 0;           // Index into lyricLines
     };
 
     struct Candidate { std::string artist, title; };
@@ -91,6 +97,7 @@ private:
     std::string currentSong;                // Display name
     std::string loadedKey;                  // Song the lyrics below belong to
     std::vector<LyricWord> lyrics;
+    std::vector<std::string> lyricLines;    // Display lines, profanity masked
     bool lyricsCensored = false;            // Copy has starred-out words, so it can't clear Whisper
     std::string source;
     bool searching = false;

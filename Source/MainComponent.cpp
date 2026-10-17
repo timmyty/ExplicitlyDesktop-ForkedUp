@@ -139,7 +139,8 @@ MainComponent::MainComponent()
     addAndMakeVisible (actualLyricsLabel);
     
     actualLyricsDisplay.setText ("", juce::dontSendNotification);
-    actualLyricsDisplay.setFont (juce::Font (32.0f, juce::Font::bold));
+    actualLyricsDisplay.setFont (juce::Font (26.0f, juce::Font::bold));
+    actualLyricsDisplay.setMinimumHorizontalScale (0.5f);
     actualLyricsDisplay.setJustificationType (juce::Justification::centred);
     actualLyricsDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::black);
     actualLyricsDisplay.setColour (juce::Label::textColourId, juce::Colours::white);
@@ -761,27 +762,9 @@ void MainComponent::updateLiveLyrics(const juce::String& words)
 
 void MainComponent::updateActualLyrics(const juce::String& words)
 {
-    // Keep last ~10 words visible (actual aligned lyrics)
-    recentActualLyrics += " " + words;
-    
-    // Trim to last 10 words
-    juce::StringArray wordArray;
-    wordArray.addTokens(recentActualLyrics, " ", "");
-    
-    if (wordArray.size() > 10)
-    {
-        int startIndex = wordArray.size() - 10;
-        juce::String trimmed;
-        for (int i = startIndex; i < wordArray.size(); ++i)
-        {
-            if (i > startIndex)
-                trimmed += " ";
-            trimmed += wordArray[i];
-        }
-        recentActualLyrics = trimmed;
-    }
-    
-    // Update display and restore normal colors (in case showing "Loading...")
+    // The engine sends the lyrics line(s) being sung right now (or Whisper's
+    // words when the song has no lyrics), so replace rather than append
+    recentActualLyrics = words;
     actualLyricsDisplay.setText(recentActualLyrics, juce::dontSendNotification);
     actualLyricsDisplay.setColour(juce::Label::textColourId, juce::Colours::white);
     actualLyricsDisplay.setColour(juce::Label::backgroundColourId, juce::Colours::black);

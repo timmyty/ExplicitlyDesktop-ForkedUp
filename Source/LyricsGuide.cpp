@@ -173,6 +173,7 @@ std::string LyricsGuide::fetchFromLrclib (const Candidate& c) const
 void LyricsGuide::setLyricsText (const std::string& songKey, const std::string& text, const std::string& src)
 {
     std::vector<LyricWord> words;
+    std::vector<std::vector<std::string>> lineTokens;   // Raw tokens per display line
     bool censoredCopy = false;
     std::istringstream lines (text);
     std::string line;
@@ -183,15 +184,18 @@ void LyricsGuide::setLyricsText (const std::string& songKey, const std::string& 
         if (t.empty() || t[0] == '#' || (t.front() == '[' && t.back() == ']'))         // [Chorus]
             continue;
 
+        lineTokens.emplace_back();
         std::istringstream ws (t);
         std::string w;
         while (ws >> w)
         {
+            lineTokens.back().push_back (w);
             // Starred words ("f**k") are censored profanity in a clean copy of the lyrics
             bool starred = w.find ('*') != std::string::npos;
             auto n = normalizeWord (w);
             if (! n.empty() || starred)
-                words.push_back ({ n.empty() ? std::string ("*") : n, starred || profanityFilter.isProfane (n) });
+                words.push_back ({ n.empty() ? std::string ("*") : n, starred || profanityFilter.isProfane (n),
+                                   (int) lineTokens.size() - 1 });
             censoredCopy = censoredCopy || starred;
         }
     }
@@ -201,11 +205,34 @@ void LyricsGuide::setLyricsText (const std::string& songKey, const std::string& 
         if (profanityFilter.isProfane (words[i].text + words[i + 1].text))
             words[i].profane = words[i + 1].profane = true;
 
+    // Display lines with profane words masked ("d***"), using the flags above
+    std::vector<std::string> displayLines;
+    size_t wi = 0;
+    for (auto& tokens : lineTokens)
+    {
+        std::string line;
+        for (auto& tok : tokens)
+        {
+            bool counted = ! normalizeWord (tok).empty() || tok.find ('*') != std::string::npos;
+            bool profane = counted && wi < words.size() && words[wi].profane;
+            if (counted) ++wi;
+
+            std::string shown = tok;
+            if (profane && tok.find ('*') == std::string::npos)
+                for (size_t c = 1; c < shown.size(); ++c)
+                    if (std::isalpha ((unsigned char) shown[c]))
+                        shown[c] = '*';
+            line += (line.empty() ? "" : " ") + shown;
+        }
+        displayLines.push_back (line);
+    }
+
     std::lock_guard<std::mutex> lock (mutex);
     if (songKey != currentKey)
         return;
 
     lyrics = std::move (words);
+    lyricLines = std::move (displayLines);
     lyricsCensored = censoredCopy;
     loadedKey = songKey;
     source = src;
@@ -292,7 +319,8 @@ float LyricsGuide::wordSimilarity (const std::string& a, const std::string& b)
     return ratio;
 }
 
-LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds)
+LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whisperWords, double chunkSeconds,
+                                            double startBias)
 {
     Decision d;
     d.lyricsSayClean.assign (whisperWords.size(), false);
@@ -372,6 +400,16 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
 
     lastPosition = bj;
 
+    // Lines covered by this chunk, for the "Actual Lyrics" display
+    int firstJ = -1;
+    for (auto& op : ops)
+        if (op.j >= 0) { firstJ = op.j; break; }
+    if (firstJ >= 0)
+    {
+        for (int line = lyrics[firstJ].line; line <= lyrics[bj - 1].line && line < (int) lyricLines.size(); ++line)
+            d.lyricsLines += (d.lyricsLines.empty() ? "" : "  /  ") + lyricLines[line];
+    }
+
     auto lyricProfane = [this] (int jj) { return jj >= 0 && jj < (int) lyrics.size() && lyrics[jj].profane; };
 
     for (size_t k = 0; k < ops.size(); ++k)
@@ -390,6 +428,7 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
             if (lyricProfane (op.j) && ! whisperProfane)
             {
                 d.extraMutes.push_back ({ whisperWords[op.i].start, whisperWords[op.i].end });
+                d.extraMuteIsFinal.push_back (false);
                 d.extraMuteWords.push_back (lyrics[op.j].text + " (heard \"" + w[op.i] + "\")");
             }
         }
@@ -400,20 +439,22 @@ LyricsGuide::Decision LyricsGuide::analyze (const std::vector<WordSegment>& whis
         }
         else if (lyricProfane (op.j))
         {
-            // Lyrics word Whisper missed: time it between the neighbouring words
-            double prevEnd = 0.0, nextStart = chunkSeconds;
+            // Lyrics word Whisper missed: it was sung just before the next word Whisper
+            // did hear. Whisper's start times run late by startBias, so the next word
+            // really starts at (its start + startBias); mute the ~0.5s before that,
+            // without reaching back past the previous heard word's start
+            double prevStart = 0.0, nextStart = chunkSeconds;
             for (int b = (int) k - 1; b >= 0; --b)
-                if (ops[b].i >= 0) { prevEnd = whisperWords[ops[b].i].end; break; }
+                if (ops[b].i >= 0) { prevStart = whisperWords[ops[b].i].start + startBias; break; }
             for (size_t f = k + 1; f < ops.size(); ++f)
-                if (ops[f].i >= 0) { nextStart = whisperWords[ops[f].i].start; break; }
+                if (ops[f].i >= 0) { nextStart = whisperWords[ops[f].i].start + startBias; break; }
 
-            if (nextStart - prevEnd < 0.3)
-            {
-                double mid = 0.5 * (prevEnd + nextStart);
-                prevEnd = mid - 0.2;
-                nextStart = mid + 0.2;
-            }
-            d.extraMutes.push_back ({ std::max (0.0, prevEnd), nextStart });
+            double muteEnd = nextStart + 0.05;
+            double muteStart = std::max ({ 0.0, prevStart + 0.1, nextStart - 0.55 });
+            if (muteEnd - muteStart < 0.25)
+                muteStart = std::max (0.0, muteEnd - 0.25);
+            d.extraMutes.push_back ({ muteStart, muteEnd });
+            d.extraMuteIsFinal.push_back (true);
             d.extraMuteWords.push_back (lyrics[op.j].text + " (not heard)");
         }
     }

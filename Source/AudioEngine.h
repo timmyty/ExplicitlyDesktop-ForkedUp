@@ -26,6 +26,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <whisper.h>
 #include <atomic>
+#include <chrono>
 #include <vector>
 #include <thread>
 #include "QualityAnalyzer.h"
@@ -227,8 +228,9 @@ private:
     
     // Configuration variables (easy tuning)
     double chunkSeconds = 2.0;           // Audio chunk size to process (larger chunks = more context)
-    double overlapSeconds = 0.5;         // Overlap between chunks to catch boundary words
+    double overlapSeconds = 1.0;         // Audio before each chunk also transcribed, to catch boundary words
     double initialDelaySeconds = 3.0;   // Initial buffering before playback starts
+    int whisperThreads = 8;              // CPU threads for Whisper (set in constructor)
     
     // Simple level tracking for Phase 1-2
     std::atomic<float> currentInputLevel {0.0f};
@@ -245,6 +247,9 @@ private:
     TimestampRefiner timestampRefiner;  // Phase 6: Accurate timestamp refinement
     LyricsAlignment lyricsAlignment;     // Phase 7: Lyrics alignment
     std::unique_ptr<LyricsGuide> lyricsGuide;  // Checks Whisper against the song's lyrics
+    struct CensorRecord { int pos; int length; std::chrono::steady_clock::time_point when; };
+    std::vector<CensorRecord> recentCensors;   // Stretches censored recently (windows overlap)
+    std::shared_ptr<bool> uiAlive = std::make_shared<bool>(true);  // Guards delayed UI updates
     double lastMediaPollTime = 0.0;
     
     // Phase 7 (Idea 2): Song Recognition & Lyrics Alignment

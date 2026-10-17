@@ -21,6 +21,14 @@ add_subdirectory(${JUCE_DIR} JUCE EXCLUDE_FROM_ALL)
 #   cmake -B build -A x64 -DBUILD_SHARED_LIBS=ON && cmake --build build --config Release
 set(WHISPER_SDK_DIR "C:/whisper.cpp" CACHE PATH "Path to whisper.cpp checkout")
 set(WHISPER_BUILD_DIR "${WHISPER_SDK_DIR}/build" CACHE PATH "Path to whisper.cpp build folder")
+# Runtime DLLs: the official CUDA build (same commit as the headers/import lib)
+# from github.com/ggml-org/whisper.cpp releases, whisper-bin-win-cuda-12.4.0-x64.zip
+if(EXISTS "C:/whisper-cuda/Release/whisper.dll")
+    set(WHISPER_DLL_DIR_DEFAULT "C:/whisper-cuda/Release")
+else()
+    set(WHISPER_DLL_DIR_DEFAULT "${WHISPER_BUILD_DIR}/bin/Release")
+endif()
+set(WHISPER_DLL_DIR "${WHISPER_DLL_DIR_DEFAULT}" CACHE PATH "Folder with whisper/ggml runtime DLLs")
 
 if(NOT EXISTS "${WHISPER_SDK_DIR}/include/whisper.h")
     message(FATAL_ERROR "Whisper SDK not found at ${WHISPER_SDK_DIR}. Please see WHISPER_SETUP.md")
@@ -85,8 +93,8 @@ if(WIN32)
         ws2_32.lib      # Sockets for the local control server
     )
     
-    # Copy whisper/ggml DLLs (CPU, or CUDA if built that way) next to the exe
-    file(GLOB WHISPER_DLLS "${WHISPER_BUILD_DIR}/bin/Release/*.dll")
+    # Copy whisper/ggml DLLs (CUDA build if present, else the CPU build) next to the exe
+    file(GLOB WHISPER_DLLS "${WHISPER_DLL_DIR}/*.dll")
     add_custom_command(TARGET ExplicitlyDesktop POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WHISPER_DLLS}
             $<TARGET_FILE_DIR:ExplicitlyDesktop>
