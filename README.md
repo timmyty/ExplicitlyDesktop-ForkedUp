@@ -42,12 +42,12 @@ and follows along with the song's lyrics.
 ## ⚙️ How it works
 
 ```
- Spotify / browsers ──► VB-CABLE ──► Explicitly Desktop ──► your speakers
-                                        │
-                                        ├─ holds ~3 s of audio
-                                        ├─ Whisper transcribes each 2 s slice (+1 s overlap)
-                                        ├─ checks words against the word list and the song's lyrics
-                                        └─ mutes each explicit word before it plays
+Spotify / browsers ─► VB-CABLE ─► Explicitly Desktop ─► speakers
+                                   │
+                                   ├─ holds ~3 s of audio
+                                   ├─ Whisper transcribes 2 s slices
+                                   ├─ checks the word list + lyrics
+                                   └─ mutes each swear before it plays
 ```
 
 - **Word timing** comes from Whisper's per-word (DTW) alignment, calibrated on real songs, so a mute covers
